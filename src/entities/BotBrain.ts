@@ -138,8 +138,10 @@ export class BotBrain {
       if (intent.move.lengthSq() > 1) intent.move.normalize();
       intent.crouch = this.burst > 0 && d > 20 && this.skill > 0.4 && Math.sin(w.time * 1.3 + s.id) > 0.3;
       this.aim(t, dt);
+      s.lookTarget = t.eyePos(new THREE.Vector3());
       this.shoot(dt, d);
     } else {
+      s.lookTarget = null;
       // walk to goal
       if (dist > 3) {
         intent.move.copy(toGoal.normalize());
@@ -238,6 +240,7 @@ export class BotBrain {
     wp.cooldown = wp.interval * (1.1 + (1 - this.skill) * 0.5);
     s.lastShotTime = w.time;
     this.burst--;
+    s.model.recoilKick(wp.def.cls === 'shotgun' || wp.def.cls === 'sniper' ? 1.6 : 0.5);
     w.effects.muzzle(eye.clone().addScaledVector(dir, 0.9), dir, wp.def.cls === 'shotgun', wp.stats.silenced);
     w.audio.play(wp.stats.silenced ? 'suppressed' : wp.stats.sound, { pos: s.pos, volume: wp.stats.silenced ? 0.35 : 0.8, maxDist: wp.stats.silenced ? 40 : 600 });
     w.bus.emit('shot', { shooter: s, pos: s.pos, silenced: wp.stats.silenced });

@@ -49,11 +49,13 @@ export class Multiplayer extends SoldierMode {
     const perTeam = this.opts.bots ?? 6;
     progress(0.75, 'Teams');
     const team = (i: number) => (this.sub === 'ffa' ? i : i % 2);
-    const pc = await this.spawnPlayer(this.spawnPoint(0), 0);
-    pc.yaw = Math.PI; // face the enemy side
+    const myTeam = this.w.net ? this.w.net.myTeam : 0;
+    const pc = await this.spawnPlayer(this.spawnPoint(myTeam), myTeam);
+    pc.yaw = myTeam % 2 === 0 ? Math.PI : 0; // face the enemy side
     const lanes: THREE.Vector3[] = [];
     for (const x of [-52, -18, 0, 18, 52]) for (const z of [-70, -35, 0, 35, 70]) lanes.push(new THREE.Vector3(x, 5, z));
-    const total = perTeam * 2 - 1;
+    const humans = this.w.net ? this.w.net.start.players.length : 1;
+    const total = this.authority ? Math.max(0, perTeam * 2 - humans) : 0;
     for (let i = 1; i <= total; i++) {
       const t = team(i);
       const b = await this.spawnBot(t, this.spawnPoint(t), 0.35 + this.rng.next() * 0.45, this.sub === 'ffa' ? TEAM_COLORS[i % TEAM_COLORS.length] : TEAM_COLORS[t]);
@@ -165,7 +167,7 @@ export class Multiplayer extends SoldierMode {
     }
     // scorestreak usage
     if (w.input.pressed('killstreak') && this.streakReady) this.useStreak();
-    if (!this.over && this.elapsed > this.timeLimit) {
+    if (this.authority && !this.over && this.elapsed > this.timeLimit) {
       const me = w.player!.soldier.team;
       const mine = this.sub === 'ffa' ? w.player!.soldier.kills : this.scores[me];
       const best = this.sub === 'ffa' ? Math.max(...w.soldiers.map((s) => s.kills)) : Math.max(...this.scores);
@@ -234,7 +236,7 @@ export class Multiplayer extends SoldierMode {
     const killer = info.attacker as Soldier | undefined;
     if (victim.kind !== 'soldier') return;
     const v = victim as Soldier;
-    if (this.sub === 'tdm' && killer && killer.team !== v.team) this.scores[killer.team]++;
+    if (this.authority && this.sub === 'tdm' && killer && killer.team !== v.team) this.scores[killer.team % 2]++;
     if (this.sub === 'ffa' && killer) this.scores[0] = Math.max(this.scores[0], killer.kills);
     if (killer?.isPlayer) {
       this.streak++;
@@ -242,12 +244,23 @@ export class Multiplayer extends SoldierMode {
       if (streaks[this.streak]) { this.streakReady = streaks[this.streak]; w_emit(this.w, `Scorestreak bereit: ${this.streakReady} [B / →]`); }
     }
     if (v.isPlayer) this.streak = 0;
-    if (this.respawns) this.respawnQ.push({ s: v, t: v.isPlayer ? 4 : 3 + Math.random() * 2 });
-    if (this.sub === 'tdm' && (this.scores[0] >= this.scoreLimit || this.scores[1] >= this.scoreLimit)) {
+    if (this.respawns && !v.netRemote) this.respawnQ.push({ s: v, t: v.isPlayer ? 4 : 3 + Math.random() * 2 });
+    if (this.authority && this.sub === 'tdm' && (this.scores[0] >= this.scoreLimit || this.scores[1] >= this.scoreLimit)) {
       const me = this.w.player!.soldier.team;
       this.finish(this.scores[me] >= this.scoreLimit, this.scores[me] >= this.scoreLimit ? 'SIEG' : 'NIEDERLAGE');
     }
     if (this.sub === 'ffa' && killer && killer.kills >= this.scoreLimit) this.finish(killer.isPlayer, killer.isPlayer ? 'SIEG – Platz 1' : `${killer.name} gewinnt`);
+  }
+
+  netState() { return { s: this.scores, e: this.elapsed, o: this.over ? 1 : 0, rw: this.roundWins, r: this.round }; }
+  applyNetState(m: any) {
+    this.scores = m.s; this.elapsed = m.e; this.roundWins = m.rw; this.round = m.r;
+    if (m.o && !this.over) {
+      const me = this.w.player!.soldier;
+      const mine = this.sub === 'ffa' ? me.kills : this.scores[me.team % 2] ?? 0;
+      const best = this.sub === 'ffa' ? Math.max(...this.w.soldiers.map((x) => x.kills)) : Math.max(...this.scores);
+      this.finish(mine >= best, mine >= best ? 'SIEG' : 'NIEDERLAGE');
+    }
   }
 
   canDamage(t: Actor, i: DamageInfo) {

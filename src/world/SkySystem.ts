@@ -11,8 +11,12 @@ export type Weather = 'clear' | 'overcast' | 'fog' | 'rain';
 const SKY_VS = /* glsl */ `varying vec3 vDir; void main(){ vDir = normalize(position); vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0); gl_Position = p.xyww; }`;
 const SKY_FS = /* glsl */ `
 uniform vec3 top; uniform vec3 horizon; uniform vec3 ground; uniform vec3 sunDir; uniform vec3 sunColor; uniform float night; uniform float time;
+uniform float cloudOn; uniform float coverage; uniform vec3 cloudLit; uniform vec3 cloudDark;
 varying vec3 vDir;
 float hash(vec3 p){ p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float h2(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(h2(i), h2(i + vec2(1.0, 0.0)), f.x), mix(h2(i + vec2(0.0, 1.0)), h2(i + vec2(1.0, 1.0)), f.x), f.y); }
+float fbm(vec2 p){ float s = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { s += a * vn(p); p = p * 2.03 + 1.7; a *= 0.5; } return s; }
 void main(){
   vec3 d = normalize(vDir);
   float h = d.y;
@@ -20,6 +24,14 @@ void main(){
   float s = max(dot(d, normalize(sunDir)), 0.0);
   col += sunColor * (pow(s, 900.0) * 6.0 + pow(s, 12.0) * 0.25);
   if (night > 0.0 && h > 0.0) { float st = step(0.9985, hash(floor(d * 300.0))); col += vec3(st) * night * (0.6 + 0.4 * sin(time * 3.0 + d.x * 50.0)); }
+  if (cloudOn > 0.5 && h > 0.0) {
+    vec2 cuv = d.xz / (h + 0.09) * 0.55 + vec2(time * 0.006, time * 0.002);
+    float n = fbm(cuv);
+    float cov = smoothstep(1.0 - coverage, 1.25 - coverage, n);
+    float lit = clamp(0.55 + (fbm(cuv * 1.9 + 4.0) - 0.5) * 1.2, 0.0, 1.0);
+    vec3 cc = mix(cloudDark, cloudLit, lit) + sunColor * pow(s, 6.0) * 0.6;
+    col = mix(col, cc, cov * smoothstep(0.0, 0.2, h) * 0.92);
+  }
   gl_FragColor = vec4(col, 1.0);
   #include <colorspace_fragment>
 }`;
@@ -39,17 +51,32 @@ export class SkySystem {
   private shadowSize: number;
   private baseFar: number;
   private camera: THREE.PerspectiveCamera | null = null;
+  private envScene: THREE.Scene | null = null;
+  private pmrem: THREE.PMREMGenerator | null = null;
+  private envRT: THREE.WebGLRenderTarget | null = null;
+  private envKey = '';
+  private envT = 0;
+  private scene: THREE.Scene;
 
-  constructor(scene: THREE.Scene, shadowMap: number, far: number) {
+  constructor(scene: THREE.Scene, shadowMap: number, far: number, opts: { clouds?: boolean; renderer?: THREE.WebGLRenderer; envMap?: boolean; shadowRange?: number } = {}) {
     this.baseFar = far;
+    this.scene = scene;
     this.mat = new THREE.ShaderMaterial({
       uniforms: {
         top: { value: new THREE.Color(0x2f6fc4) }, horizon: { value: new THREE.Color(0xbcd6ec) }, ground: { value: new THREE.Color(0x6a7a86) },
         sunDir: { value: new THREE.Vector3(0, 1, 0) }, sunColor: { value: new THREE.Color(1, 0.95, 0.85) }, night: { value: 0 }, time: { value: 0 },
+        cloudOn: { value: 0 }, coverage: { value: 0.4 }, cloudLit: { value: new THREE.Color(1, 1, 1) }, cloudDark: { value: new THREE.Color(0.6, 0.65, 0.72) },
       },
       vertexShader: SKY_VS, fragmentShader: SKY_FS, side: THREE.BackSide, depthWrite: false, depthTest: true, fog: false,
     });
+    this.mat.uniforms.cloudOn.value = opts.clouds ? 1 : 0;
     this.dome = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), this.mat);
+    if (opts.envMap && opts.renderer) {
+      // image-based lighting generated from the live sky (follows time of day & weather)
+      this.pmrem = new THREE.PMREMGenerator(opts.renderer);
+      this.envScene = new THREE.Scene();
+      const d = new THREE.Mesh(this.dome.geometry, this.mat); d.scale.setScalar(50); this.envScene.add(d);
+    }
     this.dome.scale.setScalar(far * 0.5);
     this.dome.frustumCulled = false;
     this.dome.renderOrder = -10;
@@ -59,7 +86,7 @@ export class SkySystem {
     this.sun.castShadow = shadowMap > 0;
     if (shadowMap > 0) {
       this.sun.shadow.mapSize.set(shadowMap, shadowMap);
-      const s = 70;
+      const s = opts.shadowRange ?? 70;
       const c = this.sun.shadow.camera;
       c.left = -s; c.right = s; c.top = s; c.bottom = -s; c.near = 1; c.far = 500;
       this.sun.shadow.bias = -0.0006;
@@ -114,6 +141,20 @@ export class SkySystem {
     u.sunColor.value.setRGB(1, 0.92 - dusk * 0.3, 0.8 - dusk * 0.4).multiplyScalar(night ? 0.25 : overcast);
     u.night.value = night ? 1 : 0;
     u.time.value += dt;
+    u.coverage.value = { clear: 0.38, overcast: 0.78, fog: 0.6, rain: 0.92 }[this.weather];
+    (u.cloudLit.value as THREE.Color).setRGB(1, 0.97, 0.92).multiplyScalar(night ? 0.08 : 0.35 + dayK * 0.75 * (overcast < 1 ? 0.75 : 1)).lerp(new THREE.Color(1, 0.6, 0.4), dusk * 0.5);
+    (u.cloudDark.value as THREE.Color).copy(u.cloudLit.value).multiplyScalar(overcast < 1 ? 0.55 : 0.68);
+    // refresh the IBL environment occasionally (cheap: 6 tiny renders)
+    this.envT -= dt;
+    const key = `${Math.round(this.time * 4)}|${this.weather}`;
+    if (this.pmrem && this.envScene && (key !== this.envKey) && this.envT <= 0) {
+      this.envKey = key; this.envT = 1.5;
+      const old = this.envRT;
+      this.envRT = this.pmrem.fromScene(this.envScene, 0, 0.1, 200);
+      this.scene.environment = this.envRT.texture;
+      (this.scene as THREE.Scene & { environmentIntensity: number }).environmentIntensity = night ? 0.25 : 0.55 + dayK * 0.35;
+      old?.dispose();
+    }
     // lights
     this.sun.intensity = (night ? 0.7 : 2.8 * dayK) * overcast;
     this.sun.color.set(night ? 0x8fa8ff : elev < 12 ? 0xffb070 : 0xfff1dc);
@@ -131,7 +172,7 @@ export class SkySystem {
     this.dome.scale.setScalar(far * 0.5);
     this.dome.position.copy(focus);
     // shadow frustum follows the focus point – texel-snapped to avoid shimmering
-    const snap = this.shadowSize ? 140 / this.shadowSize : 1;
+    const snap = this.shadowSize ? (this.sun.shadow.camera.right * 2) / this.shadowSize : 1;
     const fx = Math.round(focus.x / snap) * snap, fz = Math.round(focus.z / snap) * snap;
     this.sun.target.position.set(fx, focus.y, fz);
     this.sun.position.set(fx + this.sunDir.x * 200, focus.y + Math.max(this.sunDir.y, 0.25) * 200, fz + this.sunDir.z * 200);

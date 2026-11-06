@@ -121,6 +121,12 @@ export class PlayerController {
     }
     if (!s.freefall) this.freefallT = 0;
     s.move(dt, intent);
+    // third-person: the character looks where the camera aims
+    s.lookTarget = this.thirdPerson ? s.eyePos(new THREE.Vector3()).addScaledVector(this.forward(), 30) : null;
+    // camera landing dip
+    if (s.grounded && !this.wasGrounded && s.airTime === 0) this.camDipV -= 2.2;
+    this.wasGrounded = s.grounded;
+    this.camDipV += (-90 * this.camDip - 12 * this.camDipV) * dt; this.camDip += this.camDipV * dt;
     // leaning
     const leanT = s.grounded && !s.sprinting ? (inp.held('leanR') ? 1 : 0) - (inp.held('leanL') ? 1 : 0) : 0;
     s.leaning = THREE.MathUtils.lerp(s.leaning, leanT, Math.min(1, dt * 10));
@@ -170,6 +176,8 @@ export class PlayerController {
   }
   private toggleSprint = false;
   private freefallT = 0;
+  private wasGrounded = true;
+  private camDip = 0; private camDipV = 0;
 
   // ----------------------------------------------------------------- firing
   private handleFire(dt: number) {
@@ -234,9 +242,17 @@ export class PlayerController {
     this.recoilY += THREE.MathUtils.degToRad((Math.random() - 0.5) * 2 * st.recoilH) * crouchK;
     wp.bloom = Math.min(wp.bloom + (st.cls === 'smg' ? 0.25 : 0.4) * (1 - s.ads * 0.7), 6);
     this.vmKick = Math.min(1, this.vmKick + (st.cls === 'shotgun' || st.cls === 'sniper' || st.cls === 'launcher' ? 1 : 0.45));
+    const heavy = st.cls === 'shotgun' || st.cls === 'sniper' || st.cls === 'launcher';
+    this.vmImpulse(new THREE.Vector3((Math.random() - 0.5) * 0.2, 0.15, heavy ? 1.6 : 0.7), new THREE.Vector3(heavy ? 3 : 1.4, (Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * (heavy ? 2 : 1)));
+    if (st.cls !== 'launcher' && st.cls !== 'shotgun') {
+      const cam = w.engine.camera;
+      const rightV = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion), upV = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+      w.effects.casing(muzzleWorld.clone().addScaledVector(this.forward(), -0.25).addScaledVector(rightV, 0.05), rightV.multiplyScalar(2.5 + Math.random()).addScaledVector(upV, 1.8).add(s.vel));
+    }
     if (st.cls !== 'pistol') this.shake(st.cls === 'launcher' || st.cls === 'shotgun' ? 0.25 : 0.05);
     w.input.rumble(st.cls === 'shotgun' || st.cls === 'sniper' ? 0.8 : 0.25, 0.4, st.cls === 'smg' ? 40 : 80);
     s.model.setUpper('shoot', 0.02, 0.15);
+    s.model.recoilKick(st.cls === 'shotgun' || st.cls === 'sniper' || st.cls === 'launcher' ? 1.8 : 0.6);
     w.bus.emit('playerFired', s);
   }
 
@@ -406,6 +422,7 @@ export class PlayerController {
       this.vm.visible = false;
     } else {
       cam.position.copy(eye);
+      cam.position.y += this.camDip * 0.06;
       cam.quaternion.setFromEuler(rot);
       s.model.setVisible(false);
       this.vm.visible = !s.downed && !s.freefall;
@@ -469,39 +486,109 @@ export class PlayerController {
     return local.applyQuaternion(cam.quaternion).add(cam.position);
   }
 
+  // spring state for the view-model (position + rotation offsets)
+  private vmPos = new THREE.Vector3(); private vmPosV = new THREE.Vector3();
+  private vmRot = new THREE.Vector3(); private vmRotV = new THREE.Vector3();
+  private drawT = 0;
+  private breathT = 0;
+  holdBreath = 0;
+  private lastGrounded = true;
+  private landImpulse = 0;
+  private wallPull = 0;
+  private reloadPhase = -1;
+
+  /** impulse into the view-model springs (recoil, landing, melee) */
+  vmImpulse(pos: THREE.Vector3, rot: THREE.Vector3) { this.vmPosV.add(pos); this.vmRotV.add(rot); }
+
   private updateViewModel(dt: number) {
     const s = this.soldier, inp = this.w.input;
     const oc = this.w.engine.overlayCam;
     oc.fov = THREE.MathUtils.lerp(58, 42, s.ads);
     oc.updateProjectionMatrix();
     const wp = s.weapon;
+    const before = this.vmKey;
     this.ensureViewModel(wp);
+    if (this.vmKey !== before) this.drawT = 0.38; // raise animation when a new weapon is drawn
     if (!this.vmGun) return;
     const sp = Math.hypot(s.vel.x, s.vel.z);
-    this.bobT += dt * (s.sprinting ? 13 : 8.5) * Math.min(1, sp / 3);
-    const bobA = (s.grounded ? Math.min(1, sp / 4) : 0) * (1 - s.ads * 0.9);
-    const bobX = Math.sin(this.bobT) * 0.012 * bobA, bobY = Math.abs(Math.cos(this.bobT)) * 0.012 * bobA;
-    this.swayX = THREE.MathUtils.lerp(this.swayX, -inp.lookX * 0.00035, dt * 10);
-    this.swayY = THREE.MathUtils.lerp(this.swayY, inp.lookY * 0.00035, dt * 10);
-    this.vmKick = Math.max(0, this.vmKick - dt * 7);
     const len = wp.def.length;
+    // ---- base poses
     const hip = new THREE.Vector3(0.15 + len * 0.05, -0.15 - len * 0.03, -0.3 - len * 0.42);
     const sightY = this.vmGun.userData.sightY as number;
     const adsP = new THREE.Vector3(0, -0.035 - sightY * 0.55, -0.26 - len * 0.48);
-    const p = hip.lerp(adsP, s.ads);
-    p.x += bobX + this.swayX; p.y += bobY + this.swayY;
-    p.z += this.vmKick * 0.06;
-    const r = new THREE.Euler(this.vmKick * 0.12 + this.swayY * 2, this.swayX * 2, 0);
-    if (s.sprinting) { p.x += 0.05; p.y -= 0.06; r.y += 0.6; r.x -= 0.25; }
-    if (wp.reloading > 0) { const k = Math.sin(Math.min(1, 1 - wp.reloading / wp.stats.reload) * Math.PI); p.y -= k * 0.12; r.x -= k * 0.6; r.z += k * 0.4; }
-    if (this.inspectT > 0) { this.inspectT -= dt; const k = Math.sin((1 - this.inspectT / 2.2) * Math.PI); r.y += k * 1.2; r.z += k * 0.5; p.x -= k * 0.08; }
-    if (s.busyT > 0) { p.y -= 0.25; }
-    if (wp.def.cls === 'melee') { r.x += -0.4 + this.vmKick * 1.2; p.z -= this.vmKick * 0.15; }
+    const target = hip.lerp(adsP, s.ads);
+    const tr = new THREE.Vector3();
+    // ---- walk / sprint bob (figure-8), idle breathing
+    this.bobT += dt * (s.sprinting ? 12.5 : 8.5) * Math.min(1, sp / 3);
+    this.breathT += dt;
+    const bobA = (s.grounded ? Math.min(1, sp / 4) : 0) * (1 - s.ads * 0.9) * (s.sprinting ? 1.6 : 1);
+    target.x += Math.sin(this.bobT) * 0.011 * bobA;
+    target.y += Math.abs(Math.cos(this.bobT)) * 0.012 * bobA - 0.004 * bobA;
+    tr.z += Math.sin(this.bobT) * 0.025 * bobA;
+    const br = (1 - s.ads * 0.8) * (0.0025 + s.model.proc.breath * 0.006);
+    target.y += Math.sin(this.breathT * 1.7) * br; tr.x += Math.sin(this.breathT * 1.7 + 0.6) * br * 2;
+    // ---- scoped sway (hold breath with sprint while aiming)
+    if (s.ads > 0.6 && (wp.stats.scope || wp.def.cls === 'marksman')) {
+      const hold = inp.held('sprint') && this.holdBreath < 4;
+      this.holdBreath = hold ? this.holdBreath + dt : Math.max(0, this.holdBreath - dt * 0.5);
+      const k = (hold ? 0.15 : 1) * 0.6;
+      this.pitch += Math.sin(this.breathT * 1.1) * 0.00035 * k; this.yaw += Math.cos(this.breathT * 0.8) * 0.0003 * k;
+    }
+    // ---- strafe tilt + look sway (inertia)
+    const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    const strafe = s.vel.dot(right);
+    tr.z += -strafe * 0.012 * (1 - s.ads * 0.7);
+    tr.y += THREE.MathUtils.clamp(-inp.lookX * 0.0009, -0.08, 0.08) * (1 - s.ads * 0.6);
+    tr.x += THREE.MathUtils.clamp(inp.lookY * 0.0007, -0.06, 0.06) * (1 - s.ads * 0.6);
+    target.x += THREE.MathUtils.clamp(-inp.lookX * 0.00025, -0.02, 0.02);
+    target.y += THREE.MathUtils.clamp(inp.lookY * 0.0002, -0.015, 0.015);
+    // ---- sprint pose
+    if (s.sprinting) { target.x += 0.05; target.y -= 0.06; tr.y += 0.6; tr.x -= 0.25; tr.z += 0.15; }
+    // ---- jump / land
+    if (!s.grounded && this.lastGrounded && !s.swimming) this.vmImpulse(new THREE.Vector3(0, -0.15, 0), new THREE.Vector3(-0.6, 0, 0));
+    if (s.grounded && !this.lastGrounded) this.vmImpulse(new THREE.Vector3(0, -0.35, 0), new THREE.Vector3(0.9, 0, 0));
+    this.lastGrounded = s.grounded;
+    // ---- reload choreography: tilt -> mag out -> mag in (bump) -> rack
+    if (wp.reloading > 0) {
+      const k = 1 - wp.reloading / wp.stats.reload;
+      const ease = (a: number, b: number) => THREE.MathUtils.smoothstep(k, a, b);
+      const out = ease(0, 0.18) * (1 - ease(0.82, 1));
+      target.y -= out * 0.07; target.x -= out * 0.03; tr.z += out * 0.55; tr.x -= out * 0.25;
+      const ph = k < 0.35 ? 0 : k < 0.6 ? 1 : k < 0.85 ? 2 : 3;
+      if (ph !== this.reloadPhase) {
+        if (ph === 1) this.vmImpulse(new THREE.Vector3(0, -0.12, 0), new THREE.Vector3(0.4, 0, 0));
+        if (ph === 2) { this.vmImpulse(new THREE.Vector3(0, 0.25, 0), new THREE.Vector3(-0.8, 0, 0.3)); }
+        if (ph === 3 && wp.def.cls !== 'pistol') this.vmImpulse(new THREE.Vector3(-0.1, 0, 0.1), new THREE.Vector3(0, 0.6, -0.5));
+        this.reloadPhase = ph;
+      }
+    } else this.reloadPhase = -1;
+    // ---- draw (raise) animation
+    if (this.drawT > 0) { this.drawT = Math.max(0, this.drawT - dt); const k = this.drawT / 0.38; target.y -= k * k * 0.25; tr.x -= k * 0.9; tr.z += k * 0.3; }
+    // ---- inspect
+    if (this.inspectT > 0) { this.inspectT -= dt; const k = Math.sin((1 - this.inspectT / 2.2) * Math.PI); tr.y += k * 1.2; tr.z += k * 0.5; target.x -= k * 0.08; }
+    if (s.busyT > 0) target.y -= 0.25;
+    // ---- wall proximity: pull the weapon back instead of clipping into geometry
+    const eye = s.eyePos(new THREE.Vector3());
+    const hit = this.w.physics.raycast(eye, this.forward(), 1.1, s.collider);
+    this.wallPull = THREE.MathUtils.lerp(this.wallPull, hit && hit.dist < 0.95 ? 1 - hit.dist / 0.95 : 0, Math.min(1, dt * 10));
+    target.z += this.wallPull * 0.2; target.y -= this.wallPull * 0.05; tr.x += this.wallPull * 0.5; tr.y -= this.wallPull * 0.35;
+    // ---- melee
+    if (wp.def.cls === 'melee') { tr.x += -0.4 + this.vmKick * 1.4; tr.y += this.vmKick * 0.8; target.z -= this.vmKick * 0.18; }
+    this.vmKick = Math.max(0, this.vmKick - dt * 7);
+    // ---- springs (pos + rot), critically damped toward the target pose
+    const k = 260, c = 26;
+    const pe = this.vmGun.position.clone().sub(this.vmPos).sub(target);
+    void pe;
+    this.vmPosV.addScaledVector(this.vmPos, -k * dt).multiplyScalar(Math.max(0, 1 - c * dt));
+    this.vmPos.addScaledVector(this.vmPosV, dt);
+    this.vmRotV.addScaledVector(this.vmRot, -k * 0.8 * dt).multiplyScalar(Math.max(0, 1 - c * 0.9 * dt));
+    this.vmRot.addScaledVector(this.vmRotV, dt);
+    const g = this.vmGun;
+    g.position.lerp(target, Math.min(1, dt * 16)).add(this.vmPos.clone().multiplyScalar(0.12));
+    g.rotation.set(tr.x + this.vmRot.x * 0.12, tr.y + this.vmRot.y * 0.12, tr.z + this.vmRot.z * 0.12);
     // look *through* optics: hide the opaque optic model while aiming (HUD draws the reticle)
-    const optic = this.vmGun.getObjectByName('att_optic');
+    const optic = g.getObjectByName('att_optic');
     if (optic) optic.visible = s.ads < 0.8;
-    this.vmGun.position.lerp(p, Math.min(1, dt * 18));
-    this.vmGun.rotation.set(r.x, r.y, r.z);
     // consumable item while healing / plating
     if (s.busyT > 0 && (s.busyKind === 'heal' || s.busyKind === 'plate' || s.busyKind === 'syringe')) {
       const want = s.busyKind === 'plate' ? 'item_vest' : s.busyKind === 'syringe' ? 'item_syringe' : 'item_medkit';
@@ -514,7 +601,7 @@ export class PlayerController {
           this.vmItem = holder; this.vm.add(holder);
         });
       }
-      if (this.vmItem) { const k = 1 - s.busyT / (s.busyKind === 'heal' ? 3.5 : 1.1); this.vmItem.visible = true; this.vmItem.position.set(-0.05, -0.22 + Math.sin(k * Math.PI) * 0.08, -0.42); this.vmItem.rotation.set(0.4, 0.6 + k, 0); }
+      if (this.vmItem) { const kk = 1 - s.busyT / (s.busyKind === 'heal' ? 3.5 : 1.1); this.vmItem.visible = true; this.vmItem.position.set(-0.05, -0.22 + Math.sin(kk * Math.PI) * 0.08, -0.42); this.vmItem.rotation.set(0.4, 0.6 + kk, 0); }
     } else if (this.vmItem) this.vmItem.visible = false;
   }
 

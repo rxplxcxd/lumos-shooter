@@ -23,9 +23,10 @@ export abstract class SoldierMode extends Mode {
   playerTint = 0x3a6ea5;
   private aiAccum = 0;
 
-  constructor(w: GameWorld, opts: ModeOptions = {}) { super(w, opts); }
+  constructor(w: GameWorld, opts: ModeOptions & { seed?: number } = {}) { super(w, opts); if (opts.seed !== undefined) this.rng = new Rng(opts.seed); }
 
   async spawnPlayer(pos: THREE.Vector3, team = 0): Promise<PlayerController> {
+    if (this.w.net) team = this.w.net.myTeam;
     const s = new Soldier(this.w, this.playerName, team, this.playerTint);
     s.isPlayer = true;
     await s.init(this.playerModel);

@@ -109,6 +109,8 @@ export class Zombie implements Actor {
   private lastPos = new THREE.Vector3();
   private stuckT = 0;
   private useModel: string;
+  netRemote = false;
+  netId = '';
   /** melee damage per hit (BR zombies hit softer than round-based ones) */
   hitDamage = 40;
 
@@ -121,6 +123,7 @@ export class Zombie implements Actor {
   async init() {
     const tint = this.useModel.startsWith('char_mannequin') ? [0x6f8a5a, 0x7a7a5a, 0x5a6a4a, 0x8a6a5a][(Math.random() * 4) | 0] : this.type === 'brute' ? 0x7a9a6a : undefined;
     await this.model.init(this.w.assets, this.useModel, tint);
+    this.model.groundFn = (x, z) => this.w.terrain.getHeight(x, z);
     if (this.type === 'brute') this.model.root.scale.setScalar(1.35);
     this.w.scene.add(this.model.root);
     this.model.setLoco(this.speed > 3 ? 'zombieRun' : 'zombieWalk', 0, this.speed > 3 ? 1.1 : this.speed / 1.2);
@@ -157,7 +160,12 @@ export class Zombie implements Actor {
 
   damage(amount: number, info: DamageInfo): number {
     if (!this.alive) return 0;
+    if (this.netRemote && this.w.net) {
+      if (info.attacker?.isPlayer) (info.attacker as Soldier).cash += 10;
+      return this.w.net.remoteDamage(this, amount, info);
+    }
     this.health -= amount;
+    if (info.dir) this.model.flinch(info.dir, Math.min(2.5, amount / 40 + 0.5));
     this.lastHitTime = this.w.time;
     if (info.attacker?.kind === 'soldier') (info.attacker as Soldier).cash += 10; // CoD points per hit
     if (info.zone === 'legs') { this.legDmg += amount; if (!this.crawler && this.legDmg > this.maxHealth * 0.45 && Math.random() < 0.6) this.makeCrawler(); }
@@ -191,6 +199,9 @@ export class Zombie implements Actor {
   die(info: DamageInfo) {
     this.alive = false;
     this.model.setLoco('dead', 0.1);
+    if (info.dir) this.yaw = Math.atan2(-info.dir.x, -info.dir.z);
+    if (info.explosive && info.point) { const a = this.pos.clone().sub(info.point).setY(0).normalize(); this.model.launch(new THREE.Vector3(a.x * 8, 7, a.z * 8).applyAxisAngle(new THREE.Vector3(0, 1, 0), -this.yaw)); }
+    if (this.w.lowSpec === false) this.w.effects.blood(this.pos, this.w.terrain.getHeight(this.pos.x, this.pos.z));
     this.collider?.setEnabled(false);
     this.w.audio.play('zombie_death', { pos: this.pos, volume: 0.7, maxDist: 50 });
     if (info.attacker?.kind === 'soldier') (info.attacker as Soldier).cash += info.zone === 'head' ? 100 : info.melee ? 130 : 60;
@@ -202,6 +213,19 @@ export class Zombie implements Actor {
     const w = this.w;
     const camD = this.pos.distanceTo(w.engine.camera.position);
     if (!this.alive) { this.deadT += dt; this.model.update(dt, camD); if (this.deadT > 6) this.model.root.position.y -= dt * 0.4; return; }
+    if (this.netRemote) {
+      // puppet: position comes from the host, only animate
+      const sp = Math.hypot(this.vel.x, this.vel.z);
+      if (!this.crawler) this.model.setLoco(sp > 0.3 ? (sp > 3 ? 'zombieRun' : 'zombieWalk') : 'zombieIdle', 0.25, sp > 3 ? sp / 4.5 : Math.max(0.6, sp / 1.2));
+      const fx = Math.sin(this.yaw), fz = Math.cos(this.yaw);
+      this.model.proc.move.set(this.vel.x * -fz + this.vel.z * fx, this.vel.x * fx + this.vel.z * fz);
+      this.model.proc.kind = 'zombie';
+      this.model.update(dt, camD);
+      this.model.root.position.copy(this.pos);
+      this.model.root.rotation.y = this.yaw;
+      this.model.root.visible = camD < 220;
+      return;
+    }
     this.thinkT -= dt;
     if (this.thinkT <= 0) {
       this.thinkT = 0.4 + Math.random() * 0.3;
@@ -259,6 +283,10 @@ export class Zombie implements Actor {
     this.groanT -= dt;
     if (this.groanT <= 0) { this.groanT = 4 + Math.random() * 8; w.audio.play(Math.random() < 0.5 ? 'zombie_groan' : 'zombie_snarl', { pos: this.pos, volume: 0.5, maxDist: 35 }); }
     if (!this.crawler) this.model.setLoco(move.lengthSq() > 0.05 ? (this.speed > 3 ? 'zombieRun' : 'zombieWalk') : 'zombieIdle', 0.25, this.speed > 3 ? this.speed / 4.5 : Math.max(0.6, this.speed / 1.2));
+    const fx = Math.sin(this.yaw), fz = Math.cos(this.yaw);
+    this.model.proc.move.set(this.vel.x * -fz + this.vel.z * fx, this.vel.x * fx + this.vel.z * fz);
+    this.model.proc.kind = 'zombie';
+    this.model.proc.lookAt = t ? t.eyePos(new THREE.Vector3()) : null;
     this.model.update(dt, camD);
     this.model.root.position.copy(this.pos);
     this.model.root.rotation.y = this.yaw;

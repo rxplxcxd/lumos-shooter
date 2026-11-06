@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import { CharacterModel } from './CharacterModel';
+import { QUALITY_PRESETS, settings } from '../core/Settings';
 import { Weapon } from '../weapons/Weapon';
 import type { Actor, DamageInfo, HitZone } from '../gameplay/types';
 import type { GameWorld } from '../gameplay/GameWorld';
@@ -110,6 +111,9 @@ export class Soldier implements Actor {
   lastSafePos = new THREE.Vector3();
   /** e.g. sitting in the drop plane */
   frozen = false;
+  /** multiplayer: '' local, 'human' remote player puppet, 'bot' host-bot puppet */
+  netRemote: '' | 'human' | 'bot' = '';
+  netId = '';
   private lastFallY = 0;
   private blockedFallT = 0;
 
@@ -117,17 +121,23 @@ export class Soldier implements Actor {
     this.w = w; this.name = name; this.team = team; this.tint = tint;
   }
 
-  async init(modelId = 'char_mannequin') {
+  async init(modelId = 'char_mannequin', gear = QUALITY_PRESETS[settings.data.quality].gear) {
     await this.model.init(this.w.assets, modelId, this.tint);
+    this.model.groundFn = (x, z) => this.w.terrain.getHeight(x, z);
+    if (gear) await this.model.addGear(this.w.assets, this.team === 0 ? 0x4b5a3a : [0x5a4a36, 0x3e4a52, 0x4a3a3a, 0x52523a][this.team % 4]);
     this.w.scene.add(this.model.root);
     return this;
   }
+  private lastYaw = 0;
+  private sprintHeat = 0;
+  lookTarget: THREE.Vector3 | null = null;
 
   spawnAt(p: THREE.Vector3) {
     this.pos.copy(p);
     this.vel.set(0, 0, 0);
     this.alive = true; this.downed = false;
     this.health = this.maxHealth;
+    this.model.resetPose();
     this.model.setVisible(true);
     this.model.setLoco('idle', 0);
     if (!this.body) {
@@ -176,6 +186,7 @@ export class Soldier implements Actor {
   damage(amount: number, info: DamageInfo): number {
     if (!this.alive) return 0;
     if (this.w.mode && !this.w.mode.canDamage(this, info)) return 0;
+    if (this.netRemote && this.w.net) return this.w.net.remoteDamage(this, amount, info);
     if (this.perks.has('juggernog')) amount *= 0.5;
     let dealt = 0;
     if (this.armor > 0 && !info.storm) {
@@ -187,6 +198,7 @@ export class Soldier implements Actor {
     dealt += amount;
     this.lastDamageTime = this.w.time;
     if (info.attacker && info.attacker !== this) this.lastAttacker = info.attacker;
+    if (info.dir) this.model.flinch(info.dir, Math.min(2, dealt / 25 + 0.4));
     this.w.bus.emit('damage', { target: this, amount: dealt, info });
     if (this.health <= 0) {
       if (!this.downed && this.w.mode?.allowDowned(this)) this.goDown(info);
@@ -224,6 +236,12 @@ export class Soldier implements Actor {
     if (this.inVehicle) this.inVehicle.exit(this, true);
     this.model.setUpper('none', 0.1);
     this.model.setLoco('dead', 0.15);
+    // fall away from the shot; explosions throw the body
+    if (info.dir) this.yaw = Math.atan2(-info.dir.x, -info.dir.z);
+    if (info.explosive && info.point) {
+      const away = this.pos.clone().sub(info.point).setY(0).normalize();
+      this.model.launch(new THREE.Vector3(away.x * 7, 6.5, away.z * 7).applyAxisAngle(new THREE.Vector3(0, 1, 0), -this.yaw));
+    }
     this.collider?.setEnabled(false);
     this.w.onDeath(this, info);
   }
@@ -340,6 +358,7 @@ export class Soldier implements Actor {
 
   onLand(impact: number) {
     if (impact > 13 && !this.freefall) this.damage((impact - 13) * 9, { attacker: null });
+    this.model.landKick(Math.min(2, impact / 6));
     this.model.setLoco('land', 0.05);
     const s = this.w.terrain.surfaceAt(this.pos.x, this.pos.z);
     this.w.audio.play(`land_${stepSurface(s)}`, { pos: this.pos, volume: 0.7, maxDist: 40 });
@@ -406,6 +425,17 @@ export class Soldier implements Actor {
     const base = armed ? (this.ads > 0.5 || this.w.time - this.lastShotTime < 1.2 ? 'aim' : 'hold') : 'none';
     if (m.upperBase !== base) { m.upperBase = base; if (m.upper === 'none' || m.upper === 'aim' || m.upper === 'hold') m.setUpper(base, 0.18); }
     m.aimPitch = armed ? this.pitch : 0;
+    // procedural layer inputs: local velocity, turn rate, breath, look target
+    const fy = this.yaw, fx = Math.sin(fy), fz = Math.cos(fy);
+    m.proc.move.set(this.vel.x * -fz + this.vel.z * fx, this.vel.x * fx + this.vel.z * fz);
+    let dy = this.yaw - this.lastYaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    m.proc.yawRate = dt > 0 ? THREE.MathUtils.lerp(m.proc.yawRate, dy / dt, 0.2) : 0;
+    this.lastYaw = this.yaw;
+    this.sprintHeat = THREE.MathUtils.clamp(this.sprintHeat + (this.sprinting ? dt * 0.15 : -dt * 0.08), 0, 1);
+    m.proc.breath = this.sprintHeat;
+    m.proc.aimPitch = armed ? this.pitch : 0;
+    m.proc.lookAt = this.lookTarget;
+    m.proc.kind = 'soldier';
     m.update(dt, camDist);
     this.syncModel();
     this.syncHeld();

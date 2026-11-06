@@ -7,7 +7,8 @@ import { AssetManager } from './assets/AssetManager';
 import { Physics } from './physics/Physics';
 import { createBackend, type Backend } from './net/Backend';
 import { applyMatchResult, type Profile } from './net/Profile';
-import { NetClient } from './net/NetClient';
+import { NetClient, type StartInfo } from './net/NetClient';
+import { NetSync } from './net/NetSync';
 import { Menu, type PlayRequest } from './ui/Menu';
 import { Lobby3D } from './ui/Lobby3D';
 import { HUD } from './ui/HUD';
@@ -80,12 +81,14 @@ class App {
     await this.lobby.build(this.profile);
     this.menu = new Menu(this.ui, this.profile, this.backend, this.audio, this.input);
     this.menu.onPlay = (r) => this.startMatch(r);
+    this.menu.attachNet(this.net);
+    this.net.on('start', (m: StartInfo) => { if (!this.world) this.startMatch({ mode: m.mode as PlayRequest['mode'], sub: m.sub, night: m.night, party: [] }, m); });
     this.menu.onProfileChange = () => this.lobby.setOperator(this.profile);
     this.loading(false);
     this.enterMenu();
     this.engine.start();
-    const url = NetClient.url();
-    if (url) this.net.connect(url, this.profile.name).then((ok) => console.info('[net]', ok ? 'connected' : 'offline', url));
+    // realtime relay (same-origin /ws via the Vite proxy, or VITE_REALTIME_URL) – optional
+    this.net.connect(this.profile.name).then((ok) => { console.info('[net]', ok ? 'online' : 'offline', NetClient.url()); this.menu.render(); });
   }
 
   enterMenu() {
@@ -102,7 +105,7 @@ class App {
     });
   }
 
-  async startMatch(r: PlayRequest) {
+  async startMatch(r: PlayRequest, netStart?: StartInfo) {
     this.menu.hide();
     this.loading(true, 0, 'Matchmaking…');
     this.engine.clearCallbacks();
@@ -112,18 +115,20 @@ class App {
     this.engine.applyQuality();
     const w = new GameWorld(this.engine, this.assets, this.audio, this.input);
     this.world = w;
+    if (netStart && this.net.connected) w.net = new NetSync(w, this.net, netStart);
+    const seed = netStart?.seed;
     let mode: SoldierMode;
-    if (r.mode === 'br' || r.mode === 'zombieroyale') mode = new BattleRoyale(w, { sub: r.sub, zombies: r.mode === 'zombieroyale' });
-    else if (r.mode === 'mp') mode = new Multiplayer(w, { sub: r.sub, night: r.night });
-    else mode = new ZombiesMode(w, { sub: r.sub });
+    if (r.mode === 'br' || r.mode === 'zombieroyale') mode = new BattleRoyale(w, { sub: r.sub, zombies: r.mode === 'zombieroyale', seed });
+    else if (r.mode === 'mp') mode = new Multiplayer(w, { sub: r.sub, night: r.night, seed });
+    else mode = new ZombiesMode(w, { sub: r.sub, seed });
     mode.loadout = this.profile.loadouts[this.profile.selectedLoadout];
     mode.playerName = this.profile.name;
     mode.playerModel = this.profile.operator;
     mode.playerTint = this.profile.operatorTint;
     w.mode = mode;
-    if (this.net.connected) this.net.join(r.mode, r.sub);
     try {
       await mode.setup((p, l) => this.loading(true, p, l));
+      if (w.net && w.player) { this.loading(true, 0.99, 'Synchronisiere Mitspieler…'); await w.net.init(w.player.soldier.pos.clone()); }
     } catch (e) {
       console.error(e);
       alert('Fehler beim Laden des Matches: ' + (e as Error).message);
@@ -145,10 +150,7 @@ class App {
       if (!this.engine.paused) {
         w.update(dt);
         this.hud!.update(dt);
-        if (this.net.connected && w.player) {
-          const s = w.player.soldier;
-          this.net.pushState(dt, { name: s.name, p: [s.pos.x, s.pos.y, s.pos.z], yaw: s.yaw, pitch: s.pitch, anim: s.model.loco, hp: s.health, team: s.team, weapon: s.weapon.def.id });
-        }
+
       }
       if (mode.over && mode.result && !resultApplied) {
         resultApplied = true;
@@ -170,6 +172,7 @@ class App {
   }
 
   async quitMatch() {
+    if (this.world?.net?.host) this.net.send({ t: 'end' });
     this.engine.clearCallbacks();
     this.engine.paused = false;
     this.hud?.dispose(); this.hud = null;

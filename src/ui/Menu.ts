@@ -6,6 +6,7 @@ import { type Profile, XP_PER_LEVEL, BP_XP_PER_TIER, BP_TIERS } from '../net/Pro
 import { WEAPONS, ATTACHMENTS, RARITY, type WeaponDef } from '../weapons/WeaponDefs';
 import { Weapon } from '../weapons/Weapon';
 import { VEHICLES } from '../vehicles/VehicleDefs';
+import type { NetClient } from '../net/NetClient';
 
 export interface PlayRequest { mode: 'br' | 'zombieroyale' | 'mp' | 'zombies'; sub: string; night: boolean; party: string[] }
 type Tab = 'play' | 'loadout' | 'operator' | 'pass' | 'store' | 'career' | 'settings' | 'credits';
@@ -43,6 +44,29 @@ export class Menu {
   private party: string[] = [];
   private editSlot: 'primary' | 'secondary' = 'primary';
   onPlay: ((r: PlayRequest) => void) | null = null;
+  net: NetClient | null = null;
+  partyCode = Math.random().toString(36).slice(2, 6).toUpperCase();
+
+  attachNet(net: NetClient) {
+    this.net = net;
+    const rr = () => { if (this.visible && this.tab === 'play') this.render(); };
+    net.on('room', rr); net.on('status', rr); net.on('left', rr); net.on('hostLeft', rr);
+    net.on('error', (m: { msg: string }) => alert(m.msg));
+  }
+
+  private renderOnline() {
+    const n = this.net;
+    if (!n) return '';
+    const room = n.room;
+    const status = n.connected ? `<span style="color:var(--ok)">● Online</span> · Ping ${Math.round(n.ping)} ms` : `<span style="color:var(--danger)">● Offline</span> – starte <code>npm run dev</code> (Relay läuft mit) oder setze VITE_REALTIME_URL`;
+    const body = !n.connected ? `<div class="play-row"><button class="btn small ghost" data-reconnect>Verbinden</button></div>`
+      : !room ? `<div class="setting"><span>Party-Code</span><input data-code value="${this.partyCode}" maxlength="8" style="width:120px;text-transform:uppercase" /></div>
+          <div class="play-row"><button class="btn small" data-join>Raum erstellen / beitreten</button><span style="color:var(--muted);font-size:13px">Gleicher Code = gleicher Raum. Teile den Code (und die Spiel-URL) mit deinem Mitspieler.</span></div>`
+      : `<p>Raum <b style="color:var(--accent)">${room.code}</b> · ${room.players.length} Spieler ${room.running ? '· <span style="color:var(--accent)">Match läuft</span>' : ''}</p>
+          <div class="party" style="margin-top:8px">${room.players.map((p) => `<div class="member"><b>${p.id === room.host ? '👑 ' : ''}${p.name}</b><small>${p.id === n.id ? 'Du' : 'Mitspieler'}${p.id === room.host ? ' · Host' : ''}</small></div>`).join('')}</div>
+          <div class="play-row"><button class="btn small ghost" data-leave>Raum verlassen</button><span style="color:var(--muted);font-size:13px">${n.isHost ? 'Du bist Host: wähle Modus und drücke Spielen – alle starten gemeinsam.' : 'Der Host wählt den Modus und startet das Match.'}</span></div>`;
+    return `<div class="card" style="margin-top:14px"><h3>Online · Party</h3><p>${status}</p>${body}</div>`;
+  }
   onProfileChange: (() => void) | null = null;
   private focusIdx = 0;
   private navT = 0;
@@ -103,7 +127,7 @@ export class Menu {
             ${this.party.map((n, i) => `<div class="member"><b>${n}</b><small>KI-Squad · <a href="#" data-kick="${i}" style="color:var(--danger)">Kick</a></small></div>`).join('')}
             ${this.party.length + 1 < partySize ? `<button class="chip" data-invite>+ Einladen</button><button class="chip" data-addbot>+ KI-Squadmate</button>` : ''}
           </div>
-          <div class="play-row"><button class="btn" data-play>${this.g('jump')} Spielen</button><span style="color:var(--muted)">Loadout: <b style="color:var(--text)">${lo.name}</b> (${WEAPONS[lo.primary.id].name} / ${WEAPONS[lo.secondary.id].name})</span></div>
+          <div class="play-row"><button class="btn" data-play ${this.net?.room && !this.net.isHost ? 'disabled style="opacity:.5"' : ''}>${this.g('jump')} ${this.net?.room ? (this.net.isHost ? 'Online starten' : 'Warte auf Host…') : 'Spielen'}</button><span style="color:var(--muted)">Loadout: <b style="color:var(--text)">${lo.name}</b> (${WEAPONS[lo.primary.id].name} / ${WEAPONS[lo.secondary.id].name})</span></div>
         </div>
         <div class="grid">
           ${MODES.map((x) => `<div class="card mode ${x.id === this.mode ? 'selected' : ''}" data-mode="${x.id}"><span class="tag">${x.tag}</span><h3>${x.name}</h3><p>${x.desc}</p></div>`).join('')}
@@ -112,7 +136,7 @@ export class Menu {
       <div class="card" style="margin-top:14px"><h3>${m.name} – Modus</h3>
         <div class="chips">${m.subs.map(([id, n]) => `<button class="chip ${this.sub === id ? 'active' : ''}" data-sub="${id}">${n}</button>`).join('')}
         ${this.mode === 'mp' ? `<button class="chip ${this.night ? 'active' : ''}" data-night>Nachtkarte (NVG)</button>` : ''}</div>
-      </div>`;
+      </div>${this.renderOnline()}`;
   }
 
   private renderLoadout() {
@@ -184,7 +208,7 @@ export class Menu {
     const rng = (k: string, min: number, max: number, step: number, v: number) => `<input type="range" data-set="${k}" min="${min}" max="${max}" step="${step}" value="${v}" />`;
     const chk = (k: string, v: boolean) => `<input type="checkbox" data-set="${k}" ${v ? 'checked' : ''} />`;
     return `<div class="card"><div class="settings-grid">
-      <div class="setting"><span>Grafikqualität</span>${sel('quality', [['potato', 'Potato (Handheld)'], ['low', 'Niedrig'], ['medium', 'Mittel'], ['high', 'Hoch']], d.quality)}</div>
+      <div class="setting"><span>Grafikqualität</span>${sel('quality', [['potato', 'Potato (Handheld)'], ['low', 'Niedrig'], ['medium', 'Mittel'], ['high', 'Hoch'], ['ultra', 'Ultra']], d.quality)}</div>
       <div class="setting"><span>Dynamische Auflösung</span>${chk('autoQuality', d.autoQuality)}</div>
       <div class="setting"><span>Min. Render-Skalierung</span>${rng('drsMin', 0.4, 1, 0.05, d.drsMin)}</div>
       <div class="setting"><span>Ziel-FPS</span>${sel('targetFps', [['30', '30'], ['45', '45'], ['60', '60'], ['90', '90'], ['120', '120']], String(d.targetFps))}</div>
@@ -219,7 +243,15 @@ export class Menu {
     q('[data-mode]').forEach((e) => (e.onclick = () => { this.mode = e.dataset.mode as any; const m = MODES.find((x) => x.id === this.mode)!; this.sub = m.subs[0][0]; this.audio.ui('select'); this.render(); }));
     q('[data-sub]').forEach((e) => (e.onclick = () => { this.sub = e.dataset.sub!; this.audio.ui('cursor'); this.render(); }));
     q('[data-night]').forEach((e) => (e.onclick = () => { this.night = !this.night; this.render(); }));
-    q('[data-play]').forEach((e) => (e.onclick = () => { this.audio.ui('confirm'); this.onPlay?.({ mode: this.mode, sub: this.sub, night: this.night, party: this.party }); }));
+    q('[data-play]').forEach((e) => (e.onclick = () => {
+      this.audio.ui('confirm');
+      const n = this.net;
+      if (n?.room) { if (n.isHost) n.start(this.mode, this.sub, this.night); return; }
+      this.onPlay?.({ mode: this.mode, sub: this.sub, night: this.night, party: this.party });
+    }));
+    q('[data-join]').forEach((e) => (e.onclick = () => { const inp = this.root.querySelector<HTMLInputElement>('[data-code]'); this.partyCode = (inp?.value || this.partyCode).toUpperCase(); this.net?.join(this.partyCode); this.audio.ui('confirm'); }));
+    q('[data-leave]').forEach((e) => (e.onclick = () => { this.net?.leave(); this.render(); }));
+    q('[data-reconnect]').forEach((e) => (e.onclick = () => { this.net?.connect(this.profile.name).then(() => this.render()); }));
     q('[data-addbot]').forEach((e) => (e.onclick = () => { this.party.push(['Ghost', 'Rook', 'Nova', 'Echo'][this.party.length % 4]); this.render(); }));
     q('[data-kick]').forEach((e) => (e.onclick = (ev) => { ev.preventDefault(); this.party.splice(+e.dataset.kick!, 1); this.render(); }));
     q('[data-invite]').forEach((e) => (e.onclick = async () => {

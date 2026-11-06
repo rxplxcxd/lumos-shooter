@@ -17,8 +17,11 @@ import type { Soldier } from '../entities/Soldier';
 import type { Vehicle, VehicleControls } from '../vehicles/Vehicle';
 import type { Weapon } from '../weapons/Weapon';
 import { attachmentById } from '../weapons/WeaponDefs';
+import { wind } from '../world/Wind';
+import { AmbientLife } from '../world/AmbientLife';
 import type { PlayerController } from '../entities/PlayerController';
 import type { Mode } from './Mode';
+import type { NetSync } from '../net/NetSync';
 
 export interface Interactable {
   pos: THREE.Vector3;
@@ -64,6 +67,8 @@ export class GameWorld {
   vehicleControls = new Map<Vehicle, VehicleControls>();
   updaters: ((dt: number) => void)[] = [];
   lowSpec: boolean;
+  ambient: AmbientLife | null = null;
+  net: NetSync | null = null;
 
   constructor(engine: Engine, assets: AssetManager, audio: AudioSys, input: Input) {
     this.engine = engine; this.assets = assets; this.audio = audio; this.input = input;
@@ -78,17 +83,26 @@ export class GameWorld {
     this.terrain = terrain;
     this.mapSize = terrain.size;
     this.waterLevel = terrain.seaLevel;
-    this.root.add(terrain.build(this.lowSpec));
+    this.root.add(terrain.build(this.lowSpec, q.terrainDetail));
     terrain.addToPhysics(this.physics);
-    this.water = new Water(Math.min(q.far * 2.2, 4000), this.waterLevel, this.lowSpec ? 24 : 64);
+    this.water = new Water(Math.min(q.far * 2.2, 4000), this.waterLevel, this.lowSpec ? 24 : q.waterHigh ? 128 : 64, q.waterHigh);
+    this.water.setTerrain(terrain);
     this.root.add(this.water.mesh);
-    this.sky = new SkySystem(this.scene, q.shadows, q.far);
+    this.sky = new SkySystem(this.scene, q.shadows, q.far, { clouds: q.clouds, renderer: this.engine.renderer, envMap: q.envMap, shadowRange: q.shadowRange });
     this.sky.attachCamera(this.engine.camera);
     this.sky.time = opts.time ?? 13;
     this.sky.speed = opts.timeSpeed ?? 0;
     this.sky.setWeather(opts.weather ?? 'clear', this.scene);
-    this.effects = new Effects(this.scene);
+    this.effects = new Effects(this.scene, q.particles, q.decals);
+    this.effects.ground = (x, z) => Math.max(this.terrain.getHeight(x, z), this.waterLevel - 30);
+    this.effects.onCasingLand = (p) => this.audio.play('shell_drop', { pos: p, volume: 0.25, maxDist: 15, throttle: 90 });
+    this.assets.kitPiece('nature', 'Pebble_Round_1').then(async (rock) => {
+      const smg = await this.assets.template('w_smg').catch(() => null);
+      const casing = smg?.getObjectByName('bullet_smglow_0') ?? null;
+      this.effects.setDebrisSource(rock, casing);
+    }).catch(() => {});
     this.ballistics = new Ballistics(this);
+    if (q.ambientLife) this.ambient = new AmbientLife(this);
   }
 
   // ------------------------------------------------------------------ registries
@@ -245,7 +259,7 @@ export class GameWorld {
 
   // ------------------------------------------------------------------ loop
   fixedUpdate(dt: number) {
-    for (const v of this.vehicles) v.prePhysics(dt, v.driver ? this.vehicleControls.get(v) ?? null : null);
+    for (const v of this.vehicles) { if (this.net?.isRemoteVehicle(v)) continue; v.prePhysics(dt, v.driver ? this.vehicleControls.get(v) ?? null : null); }
     this.physics.step();
     for (const v of this.vehicles) v.postPhysics(dt);
     this.ballistics.update(dt);
@@ -255,11 +269,15 @@ export class GameWorld {
     this.time += dt;
     for (const u of this.updaters) u(dt);
     this.mode?.update(dt);
+    this.net?.update(dt);
     const cam = this.engine.camera;
     const focus = this.player?.soldier.pos ?? cam.position;
+    wind.uTime.value += dt;
+    wind.uStrength.value = this.sky.weather === 'rain' ? 1.8 : this.sky.weather === 'overcast' ? 1.3 : 1;
     this.sky.update(dt, focus);
     this.water.update(this.time, this.sky.sunDir, this.sky.fog, this.sky.brightness, cam.position);
     this.effects.update(dt);
+    this.ambient?.update(dt);
     this.audio.updateListener(cam);
   }
 
@@ -277,6 +295,8 @@ export class GameWorld {
   }
 
   dispose() {
+    this.net?.dispose(); this.net = null;
+    this.ambient?.dispose();
     for (const v of [...this.vehicles]) v.dispose();
     for (const s of this.soldiers) s.dispose();
     this.actors.forEach((a) => (a as any).dispose?.());

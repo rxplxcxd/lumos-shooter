@@ -11,6 +11,8 @@ export class Lobby3D {
   private opKey = '';
   private t = 0;
   private vehicle: THREE.Object3D | null = null;
+  private idleT = 6;
+  private idleIdx = 0;
   constructor(private engine: Engine, private assets: AssetManager) {}
 
   async build(profile: Profile) {
@@ -49,6 +51,8 @@ export class Lobby3D {
     m.root.position.set(0, 0, 0);
     m.root.rotation.y = 0.35;
     m.setLoco('lobby', 0);
+    await m.addGear(this.assets, 0x4b5a3a);
+    m.proc.kind = 'lobby';
     this.group.add(m.root);
   }
 
@@ -59,7 +63,13 @@ export class Lobby3D {
     cam.position.set(Math.sin(a) * 4.2 + 0.6, 1.55, Math.cos(a) * 4.2);
     cam.lookAt(0.6, 1.0, 0);
     cam.fov = 45; cam.updateProjectionMatrix();
-    this.op?.update(dt, 2);
+    if (this.op) {
+      // idle variety: arms folded -> talking -> phone -> stretch/look around
+      this.idleT -= dt;
+      if (this.idleT <= 0) { this.idleT = 7 + Math.random() * 5; const seq = ['lobby', 'idle', 'talk', 'lobby', 'phone', 'idle'] as const; this.idleIdx = (this.idleIdx + 1) % seq.length; this.op.setLoco(seq[this.idleIdx], 0.6); }
+      this.op.proc.lookAt = cam.position;
+      this.op.update(dt, 2);
+    }
     if (this.vehicle) this.vehicle.rotation.y = -0.7 + Math.sin(this.t * 0.2) * 0.05;
   }
 

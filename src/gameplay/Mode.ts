@@ -18,6 +18,8 @@ export interface ModeOptions {
   map?: string;
   bots?: number;
   night?: boolean;
+  /** shared match seed (multiplayer) */
+  seed?: number;
 }
 
 /** Base class for all game modes (BR, Zombie Royale, MP, round-based Zombies). */
@@ -43,6 +45,11 @@ export abstract class Mode {
     return this.w.soldiers.some((o) => o !== s && o.alive && !o.downed && o.team === s.team);
   }
   hud(): HudInfo { return {}; }
+  /** multiplayer: does this client run the simulation (host or offline)? */
+  get authority() { return !this.w.net || this.w.net.host; }
+  /** host -> clients mode state (snapshot) */
+  netState(): Record<string, unknown> | null { return null; }
+  applyNetState(_s: Record<string, unknown>) {}
   /** what happens when the local player dies */
   playerDied(): 'respawn' | 'spectate' { return this.respawns ? 'respawn' : 'spectate'; }
   respawnPlayer() {}

@@ -79,7 +79,8 @@ export class ZombiesMode extends SoldierMode {
     pc.soldier.armorTier = 0;
     pc.soldier.grenades = 2;
     // AI squad mates
-    const mates = settings.data.quality === 'potato' ? 1 : 2;
+    const humans = this.w.net ? this.w.net.start.players.length : 1;
+    const mates = this.authority ? Math.max(0, (settings.data.quality === 'potato' ? 1 : 2) - (humans - 1)) : 0;
     for (let i = 0; i < mates; i++) {
       const b = await this.spawnBot(0, new THREE.Vector3(i * 2 - 1, ex.y + 0.5, 3), 0.6, 0x2e86c1);
       b.s.weapons = [new Weapon(i ? 'wasp' : 'kestrel', 1), new Weapon('viper', 0)];
@@ -128,12 +129,8 @@ export class ZombiesMode extends SoldierMode {
         enabled: () => !d.open,
         use: (s) => {
           if (s.cash < d.cost) { w.audio.ui('error'); return; }
-          s.cash -= d.cost; d.open = true;
-          w.physics.removeCollider(d.collider); d.obj?.removeFromParent();
-          for (const id of d.rooms) { const r = this.rooms.find((rr) => rr.id === id)!; r.open = true; }
-          this.rebuildNav();
-          w.audio.play(d.debris ? 'debris' : 'wood_break', { pos: new THREE.Vector3(d.x, ex.y, d.z) });
-          w.bus.emit('toast', `${this.rooms.find((r) => r.id === d.rooms[1])!.name} geöffnet`);
+          s.cash -= d.cost;
+          this.zEvent('door', d.id);
         },
       });
     }
@@ -176,21 +173,15 @@ export class ZombiesMode extends SoldierMode {
           label: () => (!this.power ? 'Strom einschalten (halten)' : this.eggStage === 1 ? 'NOTSIGNAL SENDEN (halten)' : 'Generator läuft'),
           enabled: () => !this.power || this.eggStage === 1,
           use: () => {
-            if (!this.power) {
-              this.power = true; w.audio.play('engine_start', { volume: 1 }); w.bus.emit('toast', 'STROM AN – Perks & Pack-a-Punch aktiv');
-              for (const mm of ex.machines) mm.obj?.traverse((o: THREE.Object3D) => { const mat = (o as THREE.Mesh).userData?.perkMat; if (mat) mat.emissiveIntensity = 0.8; });
-              w.sky.time = 22.5;
-            } else if (this.eggStage === 1) {
-              this.eggStage = 2; this.finalT = 90; w.bus.emit('toast', 'Notsignal gesendet! Überlebe 90 Sekunden bis zur Evakuierung!');
-              w.audio.playMusic('tension'); this.toSpawn += 40;
-            }
+            if (!this.power) this.zEvent('power', '');
+            else if (this.eggStage === 1) this.zEvent('signal', '');
           },
         });
       } else if (m.kind === 'trap') {
         w.interactables.push({
           pos, radius: 2.5, label: () => (this.power ? 'Elektrofalle aktivieren [$1000]' : 'Elektrofalle (kein Strom)'), cost: () => 1000,
           enabled: () => this.trapT <= 0,
-          use: (s) => { if (!this.power || s.cash < 1000) { w.audio.ui('error'); return; } s.cash -= 1000; this.trapT = 20; w.audio.play('turbo'); },
+          use: (s) => { if (!this.power || s.cash < 1000) { w.audio.ui('error'); return; } s.cash -= 1000; this.zEvent('trap', ''); },
         });
       }
     }
@@ -216,14 +207,51 @@ export class ZombiesMode extends SoldierMode {
     (ex.radios as THREE.Vector3[]).forEach((p, i) => {
       w.interactables.push({
         pos: p.clone().setY(ex.y + 1.2), radius: 2.2, label: () => 'Funkgerät anhören', enabled: () => !this.radiosFound.has(i),
-        use: () => {
-          this.radiosFound.add(i);
-          w.bus.emit('story', LOGS[this.radiosFound.size - 1]);
-          w.audio.play('ui_popup_open');
-          if (this.radiosFound.size === 3) { this.eggStage = 1; w.bus.emit('toast', 'Alle Logs gefunden – sende das Notsignal am Generator!'); }
-        },
+        use: () => this.zEvent('radio', String(i)),
       });
     });
+  }
+
+  /** shared map events (doors, power, trap, radios, signal): apply locally and replicate */
+  zEvent(kind: string, id: string) { this.applyZEvent(kind, id, true); }
+  applyZEvent(kind: string, id: string, local: boolean) {
+    const w = this.w, ex = this.map.extra;
+    if (local && w.net) w.net.net.event({ k: 'zev', kind, id });
+    if (kind === 'door') {
+      const d = this.doors.find((x) => x.id === id);
+      if (!d || d.open) return;
+      d.open = true;
+      w.physics.removeCollider(d.collider); d.obj?.removeFromParent();
+      for (const rid of d.rooms) { const r = this.rooms.find((rr) => rr.id === rid)!; r.open = true; }
+      this.rebuildNav();
+      w.audio.play(d.debris ? 'debris' : 'wood_break', { pos: new THREE.Vector3(d.x, ex.y, d.z) });
+      w.bus.emit('toast', `${this.rooms.find((r) => r.id === d.rooms[1])!.name} geöffnet`);
+    } else if (kind === 'power' && !this.power) {
+      this.power = true; w.audio.play('engine_start', { volume: 1 }); w.bus.emit('toast', 'STROM AN – Perks & Pack-a-Punch aktiv');
+      for (const mm of ex.machines) mm.obj?.traverse((o: THREE.Object3D) => { const mat = (o as THREE.Mesh).userData?.perkMat; if (mat) mat.emissiveIntensity = 0.8; });
+      w.sky.time = 22.5;
+    } else if (kind === 'signal' && this.eggStage === 1) {
+      this.eggStage = 2; this.finalT = 90; w.bus.emit('toast', 'Notsignal gesendet! Überlebe 90 Sekunden bis zur Evakuierung!');
+      w.audio.playMusic('tension'); if (this.authority) this.toSpawn += 40;
+    } else if (kind === 'trap') { this.trapT = 20; w.audio.play('turbo'); }
+    else if (kind === 'radio') {
+      const i = Number(id);
+      if (this.radiosFound.has(i)) return;
+      this.radiosFound.add(i);
+      w.bus.emit('story', LOGS[this.radiosFound.size - 1]);
+      w.audio.play('ui_popup_open');
+      if (this.radiosFound.size === 3) { this.eggStage = Math.max(this.eggStage, 1); w.bus.emit('toast', 'Alle Logs gefunden – sende das Notsignal am Generator!'); }
+    }
+  }
+
+  netState() { return { r: this.round, ts: this.toSpawn, eg: this.eggStage, ft: this.finalT, pw: this.power ? 1 : 0, dr: this.doors.filter((d) => d.open).map((d) => d.id) }; }
+  applyNetState(m: any) {
+    if (m.r !== this.round) { this.round = m.r; this.w.bus.emit('round', this.round); }
+    this.toSpawn = m.ts; this.finalT = m.ft;
+    for (const id of m.dr as string[]) this.applyZEvent('door', id, false);
+    if (m.pw && !this.power) this.applyZEvent('power', '', false);
+    if (m.eg === 2 && this.eggStage < 2) { this.eggStage = 1; this.applyZEvent('signal', '', false); }
+    if (m.eg === 3 && this.eggStage < 3) { this.eggStage = 3; this.callHeli(); }
   }
 
   private useBox(s: Soldier, pos: THREE.Vector3) {
@@ -299,6 +327,12 @@ export class ZombiesMode extends SoldierMode {
     this.navT -= dt;
     if (this.navT <= 0 && w.player) { this.navT = 0.4; this.nav.compute(w.player.soldier.pos.x, w.player.soldier.pos.z); }
     // round flow
+    if (!this.authority) {
+      // clients: the host runs rounds/spawning; still handle own down state
+      const me0 = w.player?.soldier;
+      if (me0 && !me0.alive && !this.over) this.finish(false, `Du hast ${this.round} Runden überlebt`);
+      return;
+    }
     const alive = this.zombies.filter((z) => z.alive).length;
     if (this.toSpawn <= 0 && alive === 0 && this.eggStage < 2) {
       this.breakT -= dt;
@@ -378,12 +412,13 @@ export class ZombiesMode extends SoldierMode {
 
   hud(): HudInfo {
     const me = this.w.player?.soldier;
+    const zAlive = this.authority ? this.zombies.filter((z) => z.alive).length : [...(this.w.net?.zProxies.values() ?? [])].filter((z) => z.alive).length;
     return {
       title: 'ZOMBIES',
       round: this.round,
       points: me?.cash ?? 0,
       objective: this.eggStage === 2 ? `Evakuierung in ${Math.ceil(this.finalT)}s` : this.eggStage === 3 ? 'Steige in den Helikopter!' : !this.power ? 'Finde den Generator und schalte den Strom ein' : this.radiosFound.size < 3 ? `Funkgeräte: ${this.radiosFound.size}/3` : 'Sende das Notsignal!',
-      alive: this.zombies.filter((z) => z.alive).length + this.toSpawn,
+      alive: zAlive + this.toSpawn,
     };
   }
 }

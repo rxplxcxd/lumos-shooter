@@ -5,6 +5,7 @@ import { Rng } from './Noise';
 import { batchStatic, Scatter } from './StaticBatcher';
 import { Vehicle } from '../vehicles/Vehicle';
 import { settings, QUALITY_PRESETS } from '../core/Settings';
+import { applyWind } from './Wind';
 
 export interface POI { id: string; name: string; x: number; z: number; r: number; h: number; color?: [number, number, number]; tier: number }
 export interface MapInfo {
@@ -18,7 +19,7 @@ export interface MapInfo {
 }
 type Progress = (p: number, label: string) => void;
 
-const segFor = () => ({ potato: 128, low: 160, medium: 200, high: 256 })[settings.data.quality];
+const segFor = () => ({ potato: 128, low: 160, medium: 200, high: 256, ultra: 320 })[settings.data.quality];
 
 /** helper that places third-party models into the world with colliders + batching */
 export class MapBuilder {
@@ -96,6 +97,10 @@ export class MapBuilder {
       try { piece = await this.w.assets.kitPiece('nature', name); } catch { continue; }
       let lod: THREE.Object3D | null = null;
       try { lod = await this.w.assets.kitPiece('nature_lod', name); } catch { lod = null; }
+      if (QUALITY_PRESETS[settings.data.quality].wind && !/Rock|Pebble|RockPath/.test(name)) {
+        const amt = /Grass|Fern|Flower|Plant|Bush|Mushroom/.test(name) ? 0.09 : 0.012;
+        for (const p of [piece, lod]) p?.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) (Array.isArray(m.material) ? m.material : [m.material]).forEach((mt) => applyWind(mt, amt)); });
+      }
       const mats: THREE.Matrix4[] = [];
       let tries = 0;
       while (mats.length < per && tries++ < per * 8) {
@@ -145,7 +150,10 @@ export async function buildBRMap(w: GameWorld, seed: number, progress: Progress)
   roads.push({ pts: [[pois[6].x - 70, pois[6].z], [pois[6].x + 70, pois[6].z]], width: 9 });
   progress(0.05, 'Terrain');
   const terrain = new Terrain({ size: 1600, segments: segFor(), seed, island: true, baseHeight: 10, hills: 22, mountains: 75, flats, roads, lakes: [{ x: -160, z: -150, r: 85, depth: 8 }] });
-  await w.init(terrain, { time: settings.data.quality === 'potato' ? 13 : 12 + Math.random() * 5, weather: 'clear' });
+  const wr = new Rng(seed * 7 + 3);
+  const lowQ0 = QUALITY_PRESETS[settings.data.quality].lowSpecMaterials;
+  const weather = lowQ0 ? 'clear' : wr.pick(['clear', 'clear', 'clear', 'overcast', 'overcast', 'rain', 'fog'] as const);
+  await w.init(terrain, { time: lowQ0 ? 13 : 9 + wr.next() * 8, weather, timeSpeed: lowQ0 ? 0 : 0.004 });
   const mb = new MapBuilder(w, seed);
   const R = mb.rng;
 
@@ -270,6 +278,12 @@ export async function buildBRMap(w: GameWorld, seed: number, progress: Progress)
   await mb.scatterKit(['Bush_Common', 'Bush_Common_Flowers', 'Fern_1'], Math.round(900 * dens), { avoid, scale: [0.8, 1.6], shadow: false });
   if (QUALITY_PRESETS[settings.data.quality].grass) await mb.scatterKit(['Grass_Common_Tall', 'Grass_Wispy_Tall', 'Flower_3_Group'], 6000, { avoid, scale: [0.8, 1.4], shadow: false, chunk: 100, maxDist: 140 });
 
+  if (w.ambient) {
+    await w.ambient.addFlock(new THREE.Vector3(640, 0, 400), 70, 22, 'seagulls', 2);
+    await w.ambient.addFlock(new THREE.Vector3(-160, 0, -150), 50, 18, 'seagulls', 1);
+    await w.ambient.addFlock(new THREE.Vector3(-560, 0, 300), 60, 20, 'seagulls', 1);
+    await w.ambient.addFlock(new THREE.Vector3(-430, 0, -360), 40, 35, 'raven', 3);
+  }
   progress(0.94, 'Loot');
   // extra open-field loot near POIs
   for (const p of pois) for (let i = 0; i < 4 + p.tier * 2; i++) {
@@ -314,6 +328,7 @@ export async function buildArena(w: GameWorld, seed: number, progress: Progress,
   progress(0.7, 'Vegetation');
   await mb.scatterKit(['Pine_2', 'CommonTree_2', 'CommonTree_4'], 160, { avoid: [{ x: 0, z: 0, r: 115 }], collider: 0.35, scale: [1, 1.5], area: 200 });
   await mb.scatterKit(['Bush_Common', 'Grass_Common_Tall'], 300, { avoid: [{ x: 0, z: 0, r: 100 }], scale: [0.8, 1.4], shadow: false, area: 200 });
+  if (w.ambient) await w.ambient.addFlock(new THREE.Vector3(0, 0, 0), 60, 30, 'seagulls', 1);
   // invisible boundary walls
   for (const [x, z, hx, hz] of [[0, -112, 120, 2], [0, 112, 120, 2], [-112, 0, 2, 120], [112, 0, 2, 120]]) w.physics.addBox(new THREE.Vector3(x, 20, z), new THREE.Vector3(hx, 40, hz));
   const teamA: THREE.Vector3[] = [], teamB: THREE.Vector3[] = [];
@@ -428,6 +443,7 @@ export async function buildZombieOutpost(w: GameWorld, seed: number, progress: P
     w.root.add(l);
   }
   await mb.scatterKit(['Rock_Medium_1', 'Rock_Medium_3', 'Mushroom_Common'], 120, { avoid: [{ x: 0, z: 0, r: 50 }], scale: [1, 2.5], area: 160 });
+  if (w.ambient) await w.ambient.addFlock(new THREE.Vector3(0, y, 0), 35, 14, 'raven', 5);
   return {
     name: 'Outpost 9', pois: [{ id: 'outpost', name: 'Outpost 9', x: 0, z: 0, r: 50, h: y, tier: 1 }], lootSpots: [], spawnPoints: [new THREE.Vector3(0, y + 0.5, 0)], bounds: 160,
     extra: { rooms, doors, machines, wallbuys, radios, y },

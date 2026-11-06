@@ -95,6 +95,7 @@ export class Ballistics {
       if (s.explosive) { w.explode(p, s.explosive.radius, s.explosive.damage, b.owner, s.id); return true; }
       const dealt = bestActor.damage(dmg, { attacker: b.owner, weapon: s.id, zone: bestZone, dir: dir.clone(), point: p });
       w.effects.impact(p, dir.clone().negate(), 'flesh');
+      if (Math.random() < 0.35) w.effects.blood(p, w.terrain.getHeight(p.x, p.z));
       if (b.owner?.isPlayer) w.onPlayerHit(bestActor, dealt, bestZone, !bestActor.alive || bestActor.downed);
       return true;
     }

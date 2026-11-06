@@ -55,6 +55,10 @@ export class Vehicle {
   lastDriver: Soldier | null = null;
   spawnPos = new THREE.Vector3();
   boostFuel = 1;
+  private wheels: { node: THREE.Object3D; front: boolean; r: number }[] = [];
+  private wheelSpin = 0;
+  private fxT = 0;
+  private steerVis = 0;
 
   constructor(w: GameWorld, id: string) {
     this.w = w;
@@ -79,6 +83,21 @@ export class Vehicle {
       for (const c of anims) this.mixer.clipAction(c).play();
     }
     this.model.traverse((o) => { if (/rotor|propel|blade|helice/i.test(o.name)) this.rotors.push(o); });
+    // visible wheel nodes (when the model has them as separate parts)
+    if (this.def.domain === 'land') {
+      this.model.updateMatrixWorld(true);
+      const inv = new THREE.Matrix4().copy(this.model.matrixWorld).invert();
+      this.model.traverse((o) => {
+        if (!/wheel|tire|tyre|rim|reifen|rad_/i.test(o.name) || /steer|lenk/i.test(o.name)) return;
+        const b = new THREE.Box3().setFromObject(o);
+        if (b.isEmpty()) return;
+        const c = b.getCenter(new THREE.Vector3()).applyMatrix4(inv);
+        const sz = b.getSize(new THREE.Vector3());
+        if (Math.max(sz.x, sz.y, sz.z) > this.size.y * 0.9) return; // not a single wheel
+        this.wheels.push({ node: o, front: c.z > 0, r: Math.max(sz.y * 0.5, 0.2) });
+      });
+      if (this.wheels.length > 12) this.wheels = [];
+    }
     this.spawnPos.copy(pos);
     this.heading = yaw;
     this.createBody(pos, yaw);
@@ -396,6 +415,7 @@ export class Vehicle {
     this.model.quaternion.set(r.x, r.y, r.z, r.w);
     const camD = this.model.position.distanceTo(this.w.engine.camera.position);
     this.model.visible = camD < (this.w.lowSpec ? 260 : 520) + this.size.z * 4;
+    if (camD < 140 && !this.destroyed) this.vfx(dt);
     if (this.mixer) this.mixer.update(this.engineOn || this.driver ? dt * (this.isAir ? 1.5 : 1) : 0);
     if (this.destroyed) {
       this.wreckT += dt;
@@ -405,6 +425,41 @@ export class Vehicle {
     if (this.def.domain === 'land' && t.y < this.w.waterLevel - 1.5 && !this.destroyed) this.damage(dt * 200, null); // drowned engine
   }
   private lastSpeed = 0;
+
+  /** exhaust, dust trails, water wake & spray, rotor down-wash, afterburner, spinning wheels */
+  private vfx(dt: number) {
+    const fx = this.w.effects;
+    const q = this.model.quaternion, p = this.model.position, s = this.size;
+    const lv = this.body.linvel();
+    const fwdSpeed = new THREE.Vector3(0, 0, 1).applyQuaternion(q).dot(lv as any);
+    if (this.wheels.length) {
+      this.wheelSpin += (fwdSpeed / 0.35) * dt;
+      const steer = this.driver ? -(this.w.vehicleControls.get(this)?.steer ?? 0) * 0.45 : 0;
+      this.steerVis = THREE.MathUtils.lerp(this.steerVis, steer, Math.min(1, dt * 8));
+      for (const wh of this.wheels) { wh.node.rotation.x = this.wheelSpin; if (wh.front) wh.node.rotation.y = this.steerVis; }
+    }
+    this.fxT -= dt;
+    if (this.fxT > 0) return;
+    this.fxT = 0.06;
+    const at = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z).applyQuaternion(q).add(p);
+    const sp = Math.abs(fwdSpeed);
+    if (this.engineOn || this.driver) {
+      if (this.def.domain === 'land' && this.def.kind !== 'bicycle') fx.emit(at(s.x * 0.25, s.y * 0.15, -s.z * 0.5), new THREE.Vector3(0, 0.6, 0), new THREE.Color(0x777777), 0.18, 0.25, 1.4, -0.3, 2.5);
+      if (this.def.kind === 'jet') { for (let i = 0; i < 2; i++) fx.emit(at(0, s.y * 0.45, -s.z * 0.52), new THREE.Vector3(0, 0, -6).applyQuaternion(q), new THREE.Color(1, 0.55, 0.2), 0.9, 0.55, 0.08, 0, 0.5, true); }
+    }
+    if (this.def.domain === 'land' && sp > 7) {
+      const surf = this.w.terrain.surfaceAt(p.x, p.z);
+      if (surf !== 'asphalt' && surf !== 'water') for (const sx of [-1, 1]) fx.emit(at(sx * s.x * 0.4, 0.2, -s.z * 0.4), new THREE.Vector3((Math.random() - 0.5) * 2, 1 + Math.random(), (Math.random() - 0.5) * 2), new THREE.Color(surf === 'sand' ? 0xd8c690 : 0x9a8a6a), 0.35, 0.7 + sp * 0.03, 1.8, -0.2, 2.2);
+    }
+    if (this.def.domain === 'water' && sp > 2.5 && p.y < this.w.waterLevel + 1.5) {
+      for (const sx of [-1, 1]) fx.emit(at(sx * s.x * 0.45, 0.1, s.z * 0.2), new THREE.Vector3(sx * 2.5, 2 + sp * 0.12, 0).applyQuaternion(q), new THREE.Color(0xeaf6ff), 0.55, 0.35, 0.8, 9.8, 1.2);
+      fx.emit(at(0, 0.05, -s.z * 0.55), new THREE.Vector3(0, 0.4, 0), new THREE.Color(0xffffff), 0.45, 0.9, 2.5, 0, 1.5);
+    }
+    if (this.def.kind === 'heli' && this.engineOn && this.altitude < 14) {
+      const g = Math.max(this.w.terrain.getHeight(p.x, p.z), this.w.waterLevel);
+      for (let i = 0; i < 3; i++) { const a = Math.random() * 6.28; fx.emit(new THREE.Vector3(p.x + Math.cos(a) * 3, g + 0.3, p.z + Math.sin(a) * 3), new THREE.Vector3(Math.cos(a) * 9, 0.6, Math.sin(a) * 9), new THREE.Color(g <= this.w.waterLevel + 0.1 ? 0xeaf4ff : 0xa89878), 0.4, 1.2, 1.2, 0, 2); }
+    }
+  }
 
   private engineSound(rpm: number, load: number, pitchMul = 1) {
     if (!this.driver && !this.engineOn) { if (this.engine) { this.engine.stop(); this.engine = null; } return; }

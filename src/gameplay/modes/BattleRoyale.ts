@@ -74,7 +74,7 @@ export class BattleRoyale extends SoldierMode {
     this.loot.sniperOnly = sub === 'sniper';
     this.loot.cqbOnly = sub === 'cqb';
     progress(0.82, 'Loot');
-    const cap = { potato: 260, low: 380, medium: 520, high: 700 }[settings.data.quality];
+    const cap = { potato: 260, low: 380, medium: 520, high: 700, ultra: 900 }[settings.data.quality];
     const spots = [...this.map.lootSpots].sort(() => this.rng.next() - 0.5).slice(0, cap);
     for (const p of spots) this.loot.spawnRandom(p);
     // buy stations at the big POIs
@@ -100,7 +100,7 @@ export class BattleRoyale extends SoldierMode {
     this.listenShots();
     // everyone lands with a sidearm (Warzone style)
     w.bus.on('landed', (s: Soldier) => { if (!s.weapons[0] && !s.weapons[1]) { s.weapons[1] = new Weapon(this.loot.sniperOnly ? 'viper' : 'viper', 0); s.current = 1; s.reserve.light = Math.max(s.reserve.light, 24); } });
-    const total = { potato: 40, low: 60, medium: 100, high: 100 }[settings.data.quality];
+    const total = { potato: 40, low: 60, medium: 100, high: 100, ultra: 100 }[settings.data.quality];
     const teams = Math.ceil(total / this.teamSize);
     const pc = await this.spawnPlayer(this.planeStart.clone(), 0);
     pc.inPlane = true;
@@ -109,7 +109,7 @@ export class BattleRoyale extends SoldierMode {
     pc.soldier.collider?.setEnabled(false);
     pc.soldier.weapons = [null, null];
     pc.soldier.current = 2;
-    for (let i = 1; i < total; i++) {
+    for (let i = 1; i < (this.authority ? total : 0); i++) {
       const team = Math.floor(i / this.teamSize);
       const b = await this.spawnBot(team, this.planeStart.clone(), undefined, team === 0 ? 0x2ecc71 : TEAM_COLORS[(team % (TEAM_COLORS.length - 1)) + 1]);
       b.s.weapons = [null, null]; b.s.current = 2;
@@ -124,7 +124,7 @@ export class BattleRoyale extends SoldierMode {
       if (i % 10 === 0) progress(0.86 + (i / total) * 0.12, `Bots ${i}/${total}`);
     }
     void teams;
-    if (this.zombieMode) await this.spawnZombieHordes();
+    if (this.zombieMode && this.authority) await this.spawnZombieHordes();
     if (this.opts.sub === 'extraction') {
       for (const poi of [this.map.pois[1], this.map.pois[3], this.map.pois[2]]) this.extraction.push({ pos: new THREE.Vector3(poi.x, poi.h, poi.z), active: false, progress: 0 });
     }
@@ -134,7 +134,7 @@ export class BattleRoyale extends SoldierMode {
   }
 
   private async spawnZombieHordes() {
-    const per = { potato: 3, low: 4, medium: 6, high: 8 }[settings.data.quality];
+    const per = { potato: 3, low: 4, medium: 6, high: 8, ultra: 10 }[settings.data.quality];
     for (const poi of this.map.pois) {
       for (let i = 0; i < per; i++) {
         const z = new Zombie(this.w, this.rng.chance(0.15) ? 'runner' : this.rng.chance(0.1) ? 'brute' : 'walker', 220, this.rng.chance(0.2) ? 4.5 : 1.3);
@@ -269,7 +269,7 @@ export class BattleRoyale extends SoldierMode {
     // ---------------------------------------------------------- storm
     this.phaseT += dt;
     const ph = PHASES[Math.min(this.phase, PHASES.length - 1)];
-    if (this.planeT >= 0.5 && this.phase < PHASES.length) {
+    if (this.authority && this.planeT >= 0.5 && this.phase < PHASES.length) {
       if (!this.shrinking && this.phaseT > ph.wait) {
         this.shrinking = true; this.phaseT = 0; this.from = { ...this.zone };
         w.bus.emit('toast', 'Die Zone zieht sich zusammen!');
@@ -298,7 +298,8 @@ export class BattleRoyale extends SoldierMode {
     if (this.stormTick > 1 && (this.phase > 0 || this.shrinking)) {
       this.stormTick = 0;
       for (const s of w.soldiers) {
-        if (!s.alive || this.inFlight.has(s) || s.freefall) continue;
+        if (!s.alive || this.inFlight.has(s) || s.freefall || s.netRemote) continue;
+        if (!this.authority && !s.isPlayer) continue;
         if (Math.hypot(s.pos.x - this.zone.x, s.pos.z - this.zone.z) > this.zone.r) s.damage(ph.dps * (s.downed ? 2 : 4), { storm: true });
       }
     }
@@ -345,7 +346,7 @@ export class BattleRoyale extends SoldierMode {
     super.onKill(victim, info);
     if (victim.kind === 'soldier') {
       const s = victim as Soldier;
-      this.loot.deathDrop(s);
+      if (this.authority && !s.netRemote) this.loot.deathDrop(s);
       if (s.isPlayer) this.aliveTeamsAtDeath = this.aliveTeams().size + (this.w.soldiers.some((o) => o.team === s.team && o.alive) ? 0 : 1);
       if ((info.attacker as Soldier)?.isPlayer) (info.attacker as Soldier).cash += 300;
       // zombie royale: fallen soldiers rise again
@@ -357,6 +358,15 @@ export class BattleRoyale extends SoldierMode {
         }, 4000);
       }
     }
+  }
+
+  netState() {
+    return { z: [this.zone.x, this.zone.z, this.zone.r], n: [this.next.x, this.next.z, this.next.r], ph: this.phase, sh: this.shrinking ? 1 : 0, pt: this.phaseT, pl: this.planeT };
+  }
+  applyNetState(m: any) {
+    [this.zone.x, this.zone.z, this.zone.r] = m.z; [this.next.x, this.next.z, this.next.r] = m.n;
+    this.phase = m.ph; this.shrinking = !!m.sh; this.phaseT = m.pt;
+    if (Math.abs(this.planeT - m.pl) > 0.02) this.planeT = m.pl;
   }
 
   hud(): HudInfo {

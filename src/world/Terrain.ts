@@ -131,11 +131,12 @@ export class Terrain {
     return 'grass';
   }
 
-  build(lowSpec: boolean) {
+  build(lowSpec: boolean, detail = false) {
     const g = new THREE.PlaneGeometry(this.size, this.size, this.N, this.N);
     g.rotateX(-Math.PI / 2);
     const pos = g.getAttribute('position') as THREE.BufferAttribute;
     const colors = new Float32Array(pos.count * 3);
+    const aFlat = new Float32Array(pos.count);
     const n = this.noise;
     const c = new THREE.Color();
     const grass = new THREE.Color(0x5d8a3a), grass2 = new THREE.Color(0x7a9a45), dry = new THREE.Color(0x9a8f55);
@@ -158,22 +159,66 @@ export class Terrain {
         if (!f.color) continue;
         const d = Math.hypot(x - f.x, z - f.z);
         const w = 1 - smoothstep(f.r * 0.85, f.r + 6, d);
-        if (w > 0) c.lerp(new THREE.Color(f.color[0], f.color[1], f.color[2]), w * 0.85);
+        if (w > 0) { c.lerp(new THREE.Color(f.color[0], f.color[1], f.color[2]), w * 0.85); aFlat[i] = Math.max(aFlat[i], w); }
       }
       const r = this.roadMask[i];
       if (r > 0) c.lerp(asphalt, r);
-      const shade = 0.92 + n.noise(x / 6, z / 6) * 0.08;
+      const shade = detail ? 1 : 0.92 + n.noise(x / 6, z / 6) * 0.08;
       colors[i * 3] = c.r * shade; colors[i * 3 + 1] = c.g * shade; colors[i * 3 + 2] = c.b * shade;
     }
     g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    g.setAttribute('aRoad', new THREE.BufferAttribute(this.roadMask.slice(), 1));
+    g.setAttribute('aFlat', new THREE.BufferAttribute(aFlat, 1));
     g.computeVertexNormals();
     const mat = lowSpec
       ? new THREE.MeshLambertMaterial({ vertexColors: true })
       : new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
+    if (detail && !lowSpec) this.applyDetail(mat as THREE.MeshStandardMaterial);
     this.mesh = new THREE.Mesh(g, mat);
     this.mesh.receiveShadow = true;
     this.mesh.name = 'terrain';
     return this.mesh;
+  }
+
+  /** High-quality ground: tiled CC0 textures (city / nature megakits) blended by road, POI and slope masks. */
+  private applyDetail(mat: THREE.MeshStandardMaterial) {
+    const tl = new THREE.TextureLoader();
+    const load = (n: string, srgb: boolean) => {
+      const t = tl.load(`./assets/textures/${n}.webp`);
+      t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
+      if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+      return t;
+    };
+    const uni = { tDirt: { value: load('dirt', true) }, tDirtN: { value: load('dirt_n', false) }, tAsphalt: { value: load('asphalt', true) }, tConcrete: { value: load('concrete', true) } };
+    mat.onBeforeCompile = (sh) => {
+      Object.assign(sh.uniforms, uni);
+      sh.vertexShader = 'attribute float aRoad; attribute float aFlat; varying float vRoad; varying float vFlat; varying vec3 vWPos; varying vec3 vWN;\n' + sh.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
+        vRoad = aRoad; vFlat = aFlat; vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz; vWN = normalize(mat3(modelMatrix) * objectNormal);`);
+      sh.fragmentShader = 'uniform sampler2D tDirt; uniform sampler2D tDirtN; uniform sampler2D tAsphalt; uniform sampler2D tConcrete; varying float vRoad; varying float vFlat; varying vec3 vWPos; varying vec3 vWN;\n' + sh.fragmentShader
+        .replace('#include <color_fragment>', `#include <color_fragment>
+          vec2 tuv = vWPos.xz * 0.22;
+          float dist = length(vWPos - cameraPosition);
+          float near = smoothstep(180.0, 25.0, dist);
+          vec3 dN = texture2D(tDirt, tuv).rgb, dF = texture2D(tDirt, tuv * 0.11).rgb;
+          float lum = dot(mix(dF, dN, near * 0.7 + 0.3), vec3(0.3333));
+          vec3 base = diffuseColor.rgb;
+          vec3 col = base * (0.45 + lum * 2.1);
+          float slope = 1.0 - clamp(vWN.y, 0.0, 1.0);
+          vec3 an = abs(vWN);
+          vec3 rock = texture2D(tConcrete, vWPos.zy * 0.09).rgb * an.x + texture2D(tConcrete, vWPos.xy * 0.09).rgb * an.z + texture2D(tConcrete, vWPos.xz * 0.09).rgb * an.y;
+          col = mix(col, base * rock * 2.0, smoothstep(0.2, 0.42, slope) * 0.75);
+          col = mix(col, texture2D(tAsphalt, tuv * 0.8).rgb * 1.35, vRoad);
+          col = mix(col, texture2D(tConcrete, tuv * 0.45).rgb * base * 2.1, vFlat * 0.65 * (1.0 - vRoad));
+          diffuseColor.rgb = col;`)
+        .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+          {
+            vec3 nm = texture2D(tDirtN, vWPos.xz * 0.22).xyz * 2.0 - 1.0;
+            vec3 nW = normalize(vWN + vec3(nm.x, 0.0, nm.y) * 0.45 * smoothstep(120.0, 10.0, length(vWPos - cameraPosition)));
+            normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);
+          }`)
+        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n roughnessFactor = mix(roughnessFactor, 0.75, vRoad);');
+    };
+    mat.customProgramCacheKey = () => 'terrain-detail';
   }
 
   /** Rapier heightfield. Rapier stores heights column-major with rows along Z. */

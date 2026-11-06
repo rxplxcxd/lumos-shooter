@@ -1,4 +1,4 @@
-export type Quality = 'potato' | 'low' | 'medium' | 'high';
+export type Quality = 'potato' | 'low' | 'medium' | 'high' | 'ultra';
 export type GlyphSet = 'auto' | 'keyboard' | 'xbox' | 'playstation' | 'lumos';
 
 export interface SettingsData {
@@ -87,9 +87,19 @@ class SettingsStore {
 
 export const settings = new SettingsStore();
 
-export const QUALITY_PRESETS: Record<Quality, { shadows: number; pixelRatio: number; far: number; treeDensity: number; grass: boolean; antialias: boolean; lowSpecMaterials: boolean; drawDistance: number }> = {
-  potato: { shadows: 0, pixelRatio: 0.6, far: 650, treeDensity: 0.35, grass: false, antialias: false, lowSpecMaterials: true, drawDistance: 280 },
-  low: { shadows: 0, pixelRatio: 0.8, far: 900, treeDensity: 0.55, grass: false, antialias: false, lowSpecMaterials: true, drawDistance: 420 },
-  medium: { shadows: 1024, pixelRatio: 1, far: 1300, treeDensity: 0.8, grass: true, antialias: true, lowSpecMaterials: false, drawDistance: 650 },
-  high: { shadows: 2048, pixelRatio: 1.5, far: 1800, treeDensity: 1, grass: true, antialias: true, lowSpecMaterials: false, drawDistance: 900 },
+export interface QualityPreset {
+  shadows: number; shadowRange: number; pixelRatio: number; far: number; treeDensity: number; grass: boolean; antialias: boolean;
+  lowSpecMaterials: boolean; drawDistance: number;
+  /** post-processing composer: bloom, MSAA samples, colour grading */
+  post: boolean; bloom: number; msaa: number; ao: boolean;
+  envMap: boolean; clouds: boolean; wind: boolean; terrainDetail: boolean; waterHigh: boolean;
+  particles: number; gear: boolean; ambientLife: boolean; decals: number;
+}
+export const QUALITY_PRESETS: Record<Quality, QualityPreset> = {
+  potato: { shadows: 0, shadowRange: 0, pixelRatio: 0.6, far: 650, treeDensity: 0.35, grass: false, antialias: false, lowSpecMaterials: true, drawDistance: 280, post: false, bloom: 0, msaa: 0, ao: false, envMap: false, clouds: false, wind: false, terrainDetail: false, waterHigh: false, particles: 0.5, gear: false, ambientLife: false, decals: 32 },
+  low: { shadows: 0, shadowRange: 0, pixelRatio: 0.8, far: 900, treeDensity: 0.55, grass: false, antialias: false, lowSpecMaterials: true, drawDistance: 420, post: false, bloom: 0, msaa: 0, ao: false, envMap: false, clouds: true, wind: false, terrainDetail: false, waterHigh: false, particles: 0.7, gear: false, ambientLife: true, decals: 64 },
+  medium: { shadows: 1024, shadowRange: 70, pixelRatio: 1, far: 1300, treeDensity: 0.8, grass: true, antialias: true, lowSpecMaterials: false, drawDistance: 650, post: true, bloom: 0.45, msaa: 0, ao: false, envMap: true, clouds: true, wind: true, terrainDetail: true, waterHigh: false, particles: 1, gear: true, ambientLife: true, decals: 128 },
+  high: { shadows: 2048, shadowRange: 95, pixelRatio: 1.25, far: 1800, treeDensity: 1, grass: true, antialias: false, lowSpecMaterials: false, drawDistance: 900, post: true, bloom: 0.6, msaa: 4, ao: false, envMap: true, clouds: true, wind: true, terrainDetail: true, waterHigh: true, particles: 1.5, gear: true, ambientLife: true, decals: 256 },
+  ultra: { shadows: 4096, shadowRange: 130, pixelRatio: 1.75, far: 2200, treeDensity: 1.3, grass: true, antialias: false, lowSpecMaterials: false, drawDistance: 1200, post: true, bloom: 0.7, msaa: 4, ao: true, envMap: true, clouds: true, wind: true, terrainDetail: true, waterHigh: true, particles: 2, gear: true, ambientLife: true, decals: 512 },
 };
+export const Q = () => QUALITY_PRESETS[settings.data.quality];

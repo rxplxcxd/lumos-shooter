@@ -3,8 +3,13 @@ import { resolve } from 'node:path';
 
 export default defineConfig({
   base: './',
-  server: { host: true, port: 5173 },
-  preview: { port: 4173 },
+  server: {
+    host: true,
+    port: 5173,
+    // realtime relay (npm run server) is reachable through the same origin: ws(s)://<host>/ws
+    proxy: { '/ws': { target: 'ws://localhost:8787', ws: true, rewriteWsOrigin: true } },
+  },
+  preview: { port: 4173, proxy: { '/ws': { target: 'ws://localhost:8787', ws: true } } },
   build: {
     target: 'es2022',
     chunkSizeWarningLimit: 4000,

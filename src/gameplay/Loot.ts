@@ -31,6 +31,9 @@ export class LootSystem {
   highTier = false;
   sniperOnly = false;
   cqbOnly = false;
+  /** multiplayer hooks */
+  onTake: ((id: number) => void) | null = null;
+  onSpawn: ((it: LootItem) => void) | null = null;
 
   constructor(w: GameWorld) {
     this.w = w;
@@ -73,10 +76,13 @@ export class LootSystem {
 
   spawnWeapon(p: THREE.Vector3, wpn: Weapon) { return this.spawn(p, 'weapon', wpn.rarity, 1, undefined, wpn); }
 
-  spawn(p: THREE.Vector3, kind: LootKind, rarity: Rarity, amount: number, ammoType?: string, weapon?: Weapon): LootItem {
-    const it: LootItem = { id: this.next++, kind, pos: p.clone(), rarity, amount, ammoType, weapon, obj: null, beam: null, taken: false, base: p.y };
+  spawn(p: THREE.Vector3, kind: LootKind, rarity: Rarity, amount: number, ammoType?: string, weapon?: Weapon, forcedId?: number): LootItem {
+    const id = forcedId ?? this.next++;
+    if (forcedId !== undefined) this.next = Math.max(this.next, forcedId + 1);
+    const it: LootItem = { id, kind, pos: p.clone(), rarity, amount, ammoType, weapon, obj: null, beam: null, taken: false, base: p.y };
     this.items.push(it);
     this.loadVisual(it);
+    if (forcedId === undefined) this.onSpawn?.(it);
     this.w.interactables.push({
       pos: it.pos, radius: 2.2,
       label: () => this.label(it),
@@ -156,7 +162,9 @@ export class LootSystem {
   }
 
   /** removes the item from the world (picked up) */
-  take(it: LootItem) {
+  take(it: LootItem, fromNet = false) {
+    if (it.taken) return;
+    if (!fromNet) this.onTake?.(it.id);
     it.taken = true;
     it.obj?.removeFromParent();
     it.beam?.removeFromParent();

@@ -16,7 +16,9 @@ const KEEP = new Set(`Crouch_Fwd_Loop Crouch_Idle_Loop Dance_Loop Death01 Drivin
 Jog_Fwd_Loop Jump_Land Jump_Loop Jump_Start PickUp_Table Pistol_Aim_Down Pistol_Aim_Neutral Pistol_Aim_Up Pistol_Idle_Loop Pistol_Reload
 Pistol_Shoot Punch_Cross Punch_Jab Roll Sprint_Loop Swim_Fwd_Loop Swim_Idle_Loop Walk_Loop Sitting_Idle_Loop
 ClimbUp_1m Consume Hit_Knockback LayToIdle Melee_Hook OverhandThrow Slide_Exit Slide_Loop Slide_Start Walk_Carry_Loop Yes
-Zombie_Idle_Loop Zombie_Scratch Zombie_Walk_Fwd_Loop Idle_FoldArms_Loop NinjaJump_Idle_Loop`.split(/\s+/));
+Zombie_Idle_Loop Zombie_Scratch Zombie_Walk_Fwd_Loop Idle_FoldArms_Loop NinjaJump_Idle_Loop
+Idle_Talking_Loop Idle_TalkingPhone_Loop Idle_No_Loop Idle_Rail_Loop Idle_Rail_Call Idle_Torch_Loop Walk_Formal_Loop Hit_Head Push_Loop
+Chest_Open NinjaJump_Start NinjaJump_Land Punch_Cross Sitting_Talking_Loop Sitting_Enter Sitting_Exit`.split(/\s+/));
 
 const [ual1, ual2, outDir, ...meshes] = process.argv.slice(2);
 fs.mkdirSync(outDir, { recursive: true });

@@ -84,6 +84,13 @@ export const MODELS: Record<string, ModelDef> = {
   item_supply: { file: 'items/supply', width: 1.2 },
   item_parachute: { file: 'items/parachute', height: 4.2 },
 
+  // ---------------------------------------------------------------- soldier gear & wildlife
+  gear_helmet: { file: 'gear/helmet', width: 0.29 },
+  gear_backpack: { file: 'gear/backpack', yaw: 180, height: 0.5 },
+  gear_vest: { file: 'items/vest', height: 0.52 },
+  birds_seagulls: { file: 'gear/seagull', length: 16 },
+  bird_raven: { file: 'gear/raven', length: 0.6 },
+
   // ---------------------------------------------------------------- environment
   env_building_shop: { file: 'env/building1', height: 11 },
   env_skyscraper: { file: 'env/building_large', height: 48 },

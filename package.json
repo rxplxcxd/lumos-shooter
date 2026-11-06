@@ -2,17 +2,17 @@
   "name": "lumos-shooter",
   "version": "0.1.0",
   "private": true,
-  "description": "Lumos Strike – browser 3D tactical shooter / battle royale (Three.js + Rapier), handheld & controller optimized.",
+  "description": "Lumos Strike \u2013 browser 3D tactical shooter / battle royale (Three.js + Rapier), handheld & controller optimized.",
   "type": "module",
   "scripts": {
-    "dev": "vite --host",
-    "dev:all": "concurrently -n web,server -c cyan,magenta \"vite --host\" \"npm run server\"",
+    "dev": "concurrently -k -n web,relay -c cyan,magenta \"vite --host\" \"tsx server/index.ts\"",
     "server": "tsx server/index.ts",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview --host",
+    "preview": "concurrently -k -n web,relay -c cyan,magenta \"vite preview --host\" \"tsx server/index.ts\"",
     "typecheck": "tsc --noEmit",
     "assets:process": "node scripts/process-assets.mjs",
-    "assets:credits": "node scripts/build-credits.mjs"
+    "assets:credits": "node scripts/build-credits.mjs",
+    "dev:web": "vite --host"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",
