@@ -139,6 +139,7 @@ export class BattleRoyale extends SoldierMode {
       for (let i = 0; i < per; i++) {
         const z = new Zombie(this.w, this.rng.chance(0.15) ? 'runner' : this.rng.chance(0.1) ? 'brute' : 'walker', 220, this.rng.chance(0.2) ? 4.5 : 1.3);
         await z.init();
+        z.hitDamage = 22;
         const x = poi.x + this.rng.range(-poi.r, poi.r) * 0.6, zz = poi.z + this.rng.range(-poi.r, poi.r) * 0.6;
         z.spawn(new THREE.Vector3(x, this.w.terrain.getHeight(x, zz), zz));
         z.onDeath = (zz2) => { setTimeout(() => this.respawnZombie(zz2, poi), 30000); if (this.rng.chance(0.25)) this.loot.spawnRandom(zz2.pos.clone()); };
@@ -352,7 +353,7 @@ export class BattleRoyale extends SoldierMode {
         setTimeout(async () => {
           if (this.over) return;
           const z = new Zombie(this.w, 'runner', 250, 3.8);
-          await z.init(); z.spawn(s.pos.clone()); this.w.addActor(z); this.zombies.push(z);
+          await z.init(); z.hitDamage = 22; z.spawn(s.pos.clone()); this.w.addActor(z); this.zombies.push(z);
         }, 4000);
       }
     }

@@ -109,6 +109,8 @@ export class Zombie implements Actor {
   private lastPos = new THREE.Vector3();
   private stuckT = 0;
   private useModel: string;
+  /** melee damage per hit (BR zombies hit softer than round-based ones) */
+  hitDamage = 40;
 
   constructor(w: GameWorld, type: ZombieType, health: number, speed: number) {
     this.w = w; this.type = type; this.health = this.maxHealth = health; this.speed = speed;
@@ -218,7 +220,7 @@ export class Zombie implements Actor {
           this.attackCd = 1.3;
           this.model.setUpper('zombieAttack', 0.1, 0.9);
           w.audio.play('zombie_swipe', { pos: this.pos, volume: 0.7 });
-          setTimeout(() => { if (this.alive && t.alive && t.pos.distanceTo(this.pos) < 2.3) t.damage(this.type === 'brute' ? 60 : 40, { attacker: this, melee: true }); }, 450);
+          setTimeout(() => { if (this.alive && t.alive && t.pos.distanceTo(this.pos) < 2.3) t.damage(this.type === 'brute' ? this.hitDamage * 1.5 : this.hitDamage, { attacker: this, melee: true }); }, 450);
         }
       } else {
         const flow = this.nav?.dir(this.pos.x, this.pos.z, new THREE.Vector3());

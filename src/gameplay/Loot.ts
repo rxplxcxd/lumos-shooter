@@ -12,7 +12,7 @@ export interface LootItem {
 }
 
 const BEAM_VS = 'varying float vY; void main(){ vY = uv.y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }';
-const BEAM_FS = 'uniform vec3 color; uniform float time; varying float vY; void main(){ float a = (1.0 - vY) * 0.55 * (0.8 + 0.2 * sin(time * 3.0 + vY * 6.0)); gl_FragColor = vec4(color, a); }';
+const BEAM_FS = 'uniform vec3 color; uniform float time; varying float vY; void main(){ float a = (1.0 - vY) * 0.4 * (0.8 + 0.2 * sin(time * 3.0 + vY * 6.0)); gl_FragColor = vec4(color, a); }';
 
 /**
  * Ground loot with Fortnite/Borderlands-style rarity light beams, death-crate drops and
@@ -22,7 +22,7 @@ export class LootSystem {
   items: LootItem[] = [];
   private w: GameWorld;
   private next = 1;
-  private beamGeo = new THREE.CylinderGeometry(0.09, 0.22, 7, 8, 1, true).translate(0, 3.5, 0);
+  private beamGeo = new THREE.CylinderGeometry(0.05, 0.13, 6, 8, 1, true).translate(0, 3, 0);
   private beamMats = RARITY.map((r) => new THREE.ShaderMaterial({
     uniforms: { color: { value: new THREE.Color(r.color) }, time: { value: 0 } },
     vertexShader: BEAM_VS, fragmentShader: BEAM_FS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
