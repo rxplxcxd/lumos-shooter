@@ -117,12 +117,24 @@ export class BotBrain {
     const dist = toGoal.length();
 
     if (s.freefall) {
+      // Warzone-style drop: glide on canopy to cover distance, cut it and dive when above the target
+      const agl = s.pos.y - Math.max(w.terrain.getHeight(s.pos.x, s.pos.z), w.waterLevel);
+      let hd = 0;
       if (this.dropTarget) {
         const d = this.dropTarget.clone().sub(s.pos).setY(0);
-        if (d.length() > 5) intent.move.copy(d.normalize());
+        hd = d.length();
+        if (hd > 5) intent.move.copy(d.normalize());
         this.yaw = Math.atan2(intent.move.x, intent.move.z) || this.yaw;
       }
-      if (!s.parachute && s.pos.y - w.terrain.getHeight(s.pos.x, s.pos.z) < 150 + this.skill * 40) s.parachute = true;
+      this.chuteCd -= dt;
+      const reachFree = agl * 1.15, reachChute = agl * 2.8;
+      if (this.chuteCd <= 0) {
+        if (!s.parachute && agl > 70 && hd > reachFree && hd < reachChute * 1.4) { s.parachute = true; this.chuteCd = 1.5; }
+        else if (s.parachute && agl > 140 && hd < agl * 0.5) { s.parachute = false; this.chuteCd = 1.5; }
+      }
+      if (!s.parachute && agl < 70 + this.skill * 30) s.parachute = true;
+      this.pitch = !s.parachute && hd < agl * 0.6 ? -1.1 : -0.2; // look down to dive steeply onto the target
+      intent.pitch = this.pitch;
     } else if (this.state === 'engage' && this.target) {
       const t = this.target;
       const tp = t.pos.clone();
@@ -170,6 +182,7 @@ export class BotBrain {
       this.lastPos.copy(s.pos); this.stuckT = 0;
     }
   }
+  private chuteCd = 0;
   private reviveTarget: Soldier | null = null;
   private reviveT = 0;
 

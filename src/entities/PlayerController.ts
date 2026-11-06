@@ -112,13 +112,24 @@ export class PlayerController {
     if (inp.device === 'gamepad' && inp.pressed('sprint')) this.toggleSprint = !this.toggleSprint;
     if (inp.device === 'gamepad') intent.sprint = this.toggleSprint && inp.moveY > 0.3;
     if (inp.moveY < 0.2) this.toggleSprint = false;
-    // freefall / parachute
+    // freefall / parachute (Warzone style: deploy and cut the canopy as often as you like)
     if (s.freefall) {
-      intent.crouch = false; intent.jump = false;
+      intent.crouch = false; intent.jump = false; intent.sprint = false;
       const agl = s.pos.y - Math.max(w.terrain.getHeight(s.pos.x, s.pos.z), w.waterLevel);
       this.freefallT += dt;
-      if (!s.parachute && ((inp.pressed('jump') && this.freefallT > 0.8) || agl < 130)) { s.parachute = true; w.audio.play('wind_loop', { volume: 0.3 }); w.bus.emit('parachute', s); }
-    }
+      this.chuteCd -= dt;
+      if (inp.pressed('jump') && this.freefallT > 0.35 && this.chuteCd <= 0 && (agl > 18 || !s.parachute)) {
+        s.parachute = !s.parachute;
+        this.chuteCd = 0.4;
+        w.audio.play(s.parachute ? 'wind_loop' : 'rocket_whoosh', { volume: s.parachute ? 0.35 : 0.25, rate: s.parachute ? 1 : 1.6 });
+        w.bus.emit(s.parachute ? 'parachute' : 'chuteCut', s);
+        w.input.rumble(0.3, 0.6, 140);
+      }
+      if (!s.parachute && agl < 55 && s.vel.y < -12) { s.parachute = true; this.chuteCd = 0.6; w.bus.emit('parachute', s); w.bus.emit('toast', 'Fallschirm automatisch geöffnet'); }
+      // wind roar follows the airspeed
+      if (!this.windLoop) this.windLoop = w.audio.loop('wind_loop', 0);
+      this.windLoop?.set(Math.min(0.9, s.glideSpeed / 70) * (s.parachute ? 0.4 : 1), 0.7 + s.glideSpeed / 90);
+    } else if (this.windLoop) { this.windLoop.stop(); this.windLoop = null; }
     if (!s.freefall) this.freefallT = 0;
     s.move(dt, intent);
     // third-person: the character looks where the camera aims
@@ -170,12 +181,20 @@ export class PlayerController {
     this.updateViewModel(dt);
     // parachute visual
     if (this.parachuteMesh) {
-      this.parachuteMesh.visible = s.parachute;
-      if (s.parachute) { this.parachuteMesh.position.copy(s.pos).add(new THREE.Vector3(0, 2.6, 0)); this.parachuteMesh.rotation.y = s.yaw; this.parachuteMesh.scale.setScalar(0.75); }
+      this.chuteOpen = THREE.MathUtils.lerp(this.chuteOpen, s.parachute && s.freefall ? 1 : 0, Math.min(1, dt * (s.parachute ? 5 : 9)));
+      this.parachuteMesh.visible = this.chuteOpen > 0.03;
+      if (this.parachuteMesh.visible) {
+        this.parachuteMesh.position.copy(s.pos).add(new THREE.Vector3(0, 2.6 * this.chuteOpen, 0));
+        this.parachuteMesh.rotation.set(-s.vel.dot(new THREE.Vector3(Math.sin(s.yaw), 0, Math.cos(s.yaw))) * 0.01, s.yaw, 0);
+        this.parachuteMesh.scale.set(0.75 * this.chuteOpen, 0.75 * Math.max(0.2, this.chuteOpen), 0.75 * this.chuteOpen);
+      }
     }
   }
   private toggleSprint = false;
   private freefallT = 0;
+  private chuteOpen = 0;
+  private chuteCd = 0;
+  private windLoop: ReturnType<GameWorld['audio']['loop']> = null;
   private wasGrounded = true;
   private camDip = 0; private camDipV = 0;
 
@@ -403,7 +422,8 @@ export class PlayerController {
     if (this.inPlane) return; // mode drives the camera
     const eye = s.eyePos(new THREE.Vector3());
     const fov = this.adsFovTarget;
-    cam.fov = THREE.MathUtils.lerp(cam.fov, s.sprinting ? fov + 8 : fov, Math.min(1, dt * 12));
+    const airK = s.freefall ? Math.min(1, s.glideSpeed / 75) * (s.parachute ? 0.3 : 1) : 0;
+    cam.fov = THREE.MathUtils.lerp(cam.fov, (s.sprinting ? fov + 8 : fov) + airK * 18, Math.min(1, dt * 6));
     cam.updateProjectionMatrix();
     const rollLean = -s.leaning * 0.12;
     const slideTilt = s.slideT > 0 ? 0.06 : 0;

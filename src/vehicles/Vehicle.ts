@@ -119,7 +119,7 @@ export class Vehicle {
     const cy = land ? Math.max(s.y * 0.55, hy + 0.25) : air ? s.y * 0.62 : s.y * 0.45;
     const cd = RAPIER.ColliderDesc.cuboid(hx, hy, hz).setTranslation(0, cy, 0).setFriction(land ? 0.3 : air ? 0 : 0.6).setRestitution(0.1)
       .setCollisionGroups(groups(GROUP.VEHICLE, GROUP.WORLD | GROUP.VEHICLE | GROUP.CHAR))
-      .setMassProperties(this.def.mass, { x: 0, y: s.y * 0.2, z: 0 },
+      .setMassProperties(this.def.mass, { x: 0, y: land ? s.y * 0.1 : s.y * 0.2, z: 0 },
         { x: this.def.mass * (s.y * s.y + s.z * s.z) / 12, y: this.def.mass * (s.x * s.x + s.z * s.z) / 12, z: this.def.mass * (s.x * s.x + s.y * s.y) / 12 }, { w: 1, x: 0, y: 0, z: 0 });
     this.collider = this.w.physics.world.createCollider(cd, this.body);
     if (land && this.def.kind !== 'hover') this.createWheels();
@@ -140,14 +140,17 @@ export class Vehicle {
     for (const [x, z] of [[-wx, wz], [wx, wz], [-wx, -wz], [wx, -wz]]) {
       vc.addWheel({ x, y, z }, { x: 0, y: -1, z: 0 }, { x: -1, y: 0, z: 0 }, rest, r);
     }
+    const k = this.def.kind;
+    const stiff = k === 'tank' ? 45 : k === 'truck' ? 34 : k === 'moto' || k === 'bicycle' ? 30 : 26;
+    const crit = 2 * Math.sqrt(stiff);
     for (let i = 0; i < 4; i++) {
-      vc.setWheelSuspensionStiffness(i, this.def.kind === 'tank' ? 40 : 28);
-      vc.setWheelSuspensionCompression(i, 2.5);
-      vc.setWheelSuspensionRelaxation(i, 3.2);
-      vc.setWheelMaxSuspensionTravel(i, 0.35);
-      vc.setWheelFrictionSlip(i, this.def.kind === 'tank' ? 4 : 2.2);
-      vc.setWheelSideFrictionStiffness(i, this.def.kind === 'tank' ? 1.5 : 1.0);
-      vc.setWheelMaxSuspensionForce(i, this.def.mass * 30);
+      vc.setWheelSuspensionStiffness(i, stiff);
+      vc.setWheelSuspensionCompression(i, crit * 0.32);
+      vc.setWheelSuspensionRelaxation(i, crit * 0.48);
+      vc.setWheelMaxSuspensionTravel(i, k === 'truck' ? 0.45 : 0.35);
+      vc.setWheelFrictionSlip(i, k === 'tank' ? 4.5 : k === 'truck' ? 2.4 : 2.6);
+      vc.setWheelSideFrictionStiffness(i, k === 'tank' ? 1.6 : 1.1);
+      vc.setWheelMaxSuspensionForce(i, this.def.mass * 32);
     }
     this.vc = vc;
   }
@@ -224,24 +227,52 @@ export class Vehicle {
     }
   }
 
+  private steerS = 0;
   private drive(dt: number, c: VehicleControls | null) {
     const vc = this.vc!;
     const fwdSpeed = vc.currentVehicleSpeed();
-    let engine = 0, brake = 0, steer = 0;
+    const m = this.def.mass, k = this.def.kind;
+    let engine = 0, brake = 0, steerIn = 0;
     if (c) {
       const t = c.throttle;
-      const maxF = this.def.mass * this.def.accel * (c.boost && this.boostFuel > 0 ? 1.6 : 1);
-      if (c.boost && this.boostFuel > 0) this.boostFuel = Math.max(0, this.boostFuel - dt * 0.25);
-      if (t > 0.05) { engine = fwdSpeed < this.def.maxSpeed ? t * maxF : 0; if (fwdSpeed < -1) { brake = this.def.mass * 0.03; engine = 0; } }
-      else if (t < -0.05) { if (fwdSpeed > 1) brake = this.def.mass * 0.03 * -t; else engine = fwdSpeed > -this.def.maxSpeed * 0.35 ? t * maxF * 0.6 : 0; }
-      if (c.handbrake) brake = this.def.mass * 0.05;
-      const maxSteer = this.def.kind === 'tank' ? 0.75 : this.def.kind === 'truck' ? 0.45 : 0.55;
-      steer = -c.steer * maxSteer * (1 - Math.min(Math.abs(fwdSpeed) / this.def.maxSpeed, 1) * 0.6);
-    } else brake = this.def.mass * 0.01;
+      const boost = c.boost && this.boostFuel > 0;
+      // torque falls off towards top speed instead of a hard cut (feels like a real gearbox / drag limit)
+      const vk = THREE.MathUtils.clamp(Math.abs(fwdSpeed) / (this.def.maxSpeed * (boost ? 1.2 : 1)), 0, 1);
+      const maxF = m * this.def.accel * (boost ? 1.6 : 1) * (1.15 - vk * vk * 0.95);
+      if (boost) this.boostFuel = Math.max(0, this.boostFuel - dt * 0.25);
+      if (t > 0.05) { engine = vk < 1 ? t * maxF : 0; if (fwdSpeed < -1) { brake = m * 0.035; engine = 0; } }
+      else if (t < -0.05) { if (fwdSpeed > 1) brake = m * 0.035 * -t; else engine = fwdSpeed > -this.def.maxSpeed * 0.35 ? t * maxF * 0.6 : 0; }
+      if (c.handbrake) brake = Math.max(brake, m * 0.02);
+      const maxSteer = k === 'tank' ? 0.75 : k === 'truck' ? 0.45 : 0.58;
+      steerIn = -c.steer * maxSteer * (1 - Math.min(Math.abs(fwdSpeed) / this.def.maxSpeed, 1) * 0.62);
+    } else brake = m * 0.012;
+    // steering rack has inertia; returns to centre faster than it turns in
+    this.steerS += (steerIn - this.steerS) * Math.min(1, dt * (Math.abs(steerIn) > Math.abs(this.steerS) ? 7 : 10));
+    const steer = this.steerS;
+    const hb = !!c?.handbrake;
     for (let i = 0; i < 4; i++) {
-      vc.setWheelEngineForce(i, engine / 4);
-      vc.setWheelBrake(i, brake / 4);
-      vc.setWheelSteering(i, i < 2 ? steer : this.def.kind === 'tank' ? -steer : 0);
+      const rear = i >= 2;
+      // rear-biased drive; handbrake locks the rear wheels and lets the tail slide for drifts
+      vc.setWheelEngineForce(i, engine * (k === 'tank' || k === 'truck' ? 0.25 : rear ? 0.32 : 0.18));
+      vc.setWheelBrake(i, rear && hb ? m * 0.03 : brake / 4);
+      vc.setWheelSideFrictionStiffness(i, rear && hb ? 0.45 : k === 'tank' ? 1.6 : 1.1);
+      vc.setWheelSteering(i, i < 2 ? steer : k === 'tank' ? -steer : 0);
+    }
+    // aerodynamics: quadratic drag + downforce keeps fast cars planted
+    this.body.resetForces(true);
+    const lv = this.body.linvel();
+    const v2 = lv.x * lv.x + lv.z * lv.z;
+    const v = Math.sqrt(v2);
+    if (v > 0.5) {
+      const drag = m * 0.0009 * v;
+      this.body.addForce({ x: -lv.x * drag, y: -m * 0.0035 * v2 * (k === 'moto' || k === 'bicycle' ? 0.4 : 1), z: -lv.z * drag }, true);
+    }
+    // airborne: gentle self-levelling so jumps land on the wheels instead of the roof
+    let contact = 0;
+    for (let i = 0; i < 4; i++) if (vc.wheelIsInContact(i)) contact++;
+    if (contact === 0) {
+      const av = this.body.angvel();
+      this.body.setAngvel({ x: av.x * (1 - Math.min(1, dt * 1.5)), y: av.y, z: av.z * (1 - Math.min(1, dt * 1.5)) }, true);
     }
     vc.updateVehicle(dt, undefined, groups(0xffff, GROUP.WORLD | GROUP.VEHICLE), (col) => col.handle !== this.collider.handle && !this.w.isCharacterCollider(col));
     // anti-flip / self-right

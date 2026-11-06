@@ -269,50 +269,64 @@ export class Soldier implements Actor {
       return;
     }
 
-    // ----- desired horizontal velocity
+    // ----- desired horizontal velocity (acceleration / friction model)
     const wantCrouch = intent.crouch && !this.swimming;
-    let speed = 4.2;
+    let speed = 4.5;
     const wpn = this.weapon;
     const moving = intent.move.lengthSq() > 0.01;
     this.sprinting = intent.sprint && moving && !wantCrouch && this.ads < 0.3 && !this.downed && this.busyT <= 0;
-    if (this.sprinting) speed = this.perks.has('staminup') ? 8.4 : 7.4;
-    if (wantCrouch) speed = 2.3;
+    if (this.sprinting) speed = (this.perks.has('staminup') ? 7.9 : 7.1) + (this.sprintBoost > 0 ? 0.8 : 0);
+    if (wantCrouch) speed = 2.4;
     if (this.downed) speed = 0.9;
-    if (this.swimming) speed = this.sprinting ? 3.6 : 2.4;
-    speed *= wpn.stats.moveMul * (1 - this.ads * 0.45);
+    if (this.swimming) speed = this.sprinting ? 3.4 : 2.2;
+    speed *= wpn.stats.moveMul * (1 - this.ads * 0.42);
     if (this.busyKind === 'plate' || this.busyKind === 'heal') speed *= 0.55;
+    if (this.sprintBoost > 0) this.sprintBoost -= dt;
+    // slope: slower uphill, a little faster downhill
+    if (this.grounded && moving && !this.freefall) {
+      const n = w.terrain.getNormal(this.pos.x, this.pos.z, tmpC);
+      const up = -(n.x * intent.move.x + n.z * intent.move.z);
+      speed *= THREE.MathUtils.clamp(1 - up * 0.9, 0.55, 1.12);
+    }
 
-    // slide: sprint + crouch
+    // slide: sprint + crouch keeps momentum, friction bleeds it off, downhill slides accelerate
     if (this.sprinting && intent.crouch && this.slideT <= 0 && this.grounded) {
-      this.slideT = 0.85;
+      this.slideT = 1.1;
       this.slideDir.copy(intent.move).normalize();
+      this.slideSpeed = Math.max(Math.hypot(this.vel.x, this.vel.z), 6.5) + 2.2;
       w.audio.play('step_gravel', { pos: this.pos, volume: 0.6 });
     }
     if (this.slideT > 0) {
       this.slideT -= dt;
-      if (!intent.crouch && this.slideT < 0.6) this.slideT = 0; // slide cancel
+      const n = w.terrain.getNormal(this.pos.x, this.pos.z, tmpC);
+      const downhill = n.x * this.slideDir.x + n.z * this.slideDir.z;
+      this.slideSpeed = Math.max(0, this.slideSpeed - (5.2 - downhill * 14) * dt);
+      if ((!intent.crouch && this.slideT < 0.85) || this.slideSpeed < 3.2) this.slideT = 0; // slide cancel / stop
+      if (intent.jump && this.slideT > 0) { this.slideT = 0; this.vel.y = 5.6; this.grounded = false; this.model.setLoco('jump', 0.08); } // slide-jump keeps momentum
     }
     this.crouching = wantCrouch || this.slideT > 0;
 
     const target = tmpA.copy(intent.move).multiplyScalar(speed);
-    if (this.slideT > 0) target.copy(this.slideDir).multiplyScalar(4 + this.slideT * 9);
-    if (this.freefall) target.copy(intent.move).multiplyScalar(this.parachute ? 13 : 22);
-    const accel = this.grounded || this.swimming ? 14 : this.freefall ? 2 : 3;
-    this.vel.x += (target.x - this.vel.x) * Math.min(1, accel * dt);
-    this.vel.z += (target.z - this.vel.z) * Math.min(1, accel * dt);
+    if (this.slideT > 0) target.copy(this.slideDir).multiplyScalar(this.slideSpeed);
+    if (this.freefall) this.glide(dt, intent, target);
+    else {
+      // ground: strong acceleration and friction; air: limited control, momentum preserved
+      const cur = Math.hypot(this.vel.x, this.vel.z);
+      const accel = this.grounded || this.swimming ? (target.lengthSq() > cur * cur ? 11 : 13) : 2.2;
+      this.vel.x += (target.x - this.vel.x) * Math.min(1, accel * dt);
+      this.vel.z += (target.z - this.vel.z) * Math.min(1, accel * dt);
+    }
 
     // ----- vertical
     if (this.swimming) {
       const surf = water - 1.35;
       const wantY = intent.crouch ? -2 : intent.jump ? 1.6 : (surf - this.pos.y) * 2;
       this.vel.y += (wantY - this.vel.y) * Math.min(1, 4 * dt);
-    } else if (this.freefall) {
-      const term = this.parachute ? -6 : -50 - Math.max(0, intent.move.dot(tmpB.set(Math.sin(this.yaw), 0, Math.cos(this.yaw)))) * 12;
-      this.vel.y += (term - this.vel.y) * Math.min(1, (this.parachute ? 3 : 0.8) * dt);
-    } else {
-      this.vel.y -= 22 * dt;
-      if (this.grounded && intent.jump && !this.crouching && !this.downed) {
-        if (!this.tryMantle()) { this.vel.y = 7.2; this.grounded = false; this.model.setLoco('jump', 0.08); }
+    } else if (!this.freefall) {
+      this.vel.y -= 18.5 * dt; // slightly heavier than real gravity for a grounded shooter feel
+      if (this.vel.y < -55) this.vel.y = -55;
+      if (this.grounded && intent.jump && !this.crouching && !this.downed && this.slideT <= 0) {
+        if (!this.tryMantle()) { this.vel.y = 6.6; this.grounded = false; this.model.setLoco('jump', 0.08); }
       }
     }
 
@@ -356,8 +370,41 @@ export class Soldier implements Actor {
     this.footsteps(dt);
   }
 
+  /**
+   * Warzone-style skydive: the direction of the movement input (relative to the camera) is the
+   * glide direction. Forward = strong diagonal glide, looking down + forward = steep dive,
+   * back = flare. With the canopy open the glide ratio is high, so far-away POIs are reachable.
+   */
+  private glide(dt: number, intent: Intent, out: THREE.Vector3) {
+    const fwd = tmpB.set(Math.sin(intent.yaw), 0, Math.cos(intent.yaw));
+    const f = intent.move.dot(fwd);
+    const look = THREE.MathUtils.clamp(-intent.pitch, -0.3, 1.2); // >0 looking down
+    const input = intent.move.length();
+    let horiz: number, sink: number;
+    if (!this.parachute) {
+      const dive = Math.max(0, f) * THREE.MathUtils.smoothstep(look, 0.35, 1.0);
+      const glideK = input * (1 - dive);
+      horiz = 7 + glideK * 38 + dive * 18 - Math.max(0, -f) * 6;
+      sink = 44 + dive * 26 - glideK * 10 - Math.max(0, -f) * 6;
+      this.diveK = THREE.MathUtils.lerp(this.diveK, dive, Math.min(1, dt * 3));
+    } else {
+      const brake = Math.max(0, -f);
+      horiz = 7 + Math.max(0, f) * 16 + (input - Math.abs(f)) * 9 - brake * 5;
+      sink = 6.2 + Math.max(0, f) * 1.4 - brake * 2;
+      this.diveK = THREE.MathUtils.lerp(this.diveK, 0, Math.min(1, dt * 3));
+    }
+    // direction: input direction, or forward drift when there is no input
+    const dir = input > 0.05 ? tmpC.copy(intent.move).normalize() : tmpC.copy(fwd);
+    out.copy(dir).multiplyScalar(Math.max(0, horiz));
+    const accH = this.parachute ? 4 : 2.6;
+    this.vel.x += (out.x - this.vel.x) * Math.min(1, accH * dt);
+    this.vel.z += (out.z - this.vel.z) * Math.min(1, accH * dt);
+    this.vel.y += (-sink - this.vel.y) * Math.min(1, (this.parachute ? 2.5 : 0.9) * dt);
+    this.glideSpeed = Math.hypot(this.vel.x, this.vel.z, this.vel.y);
+  }
+
   onLand(impact: number) {
-    if (impact > 13 && !this.freefall) this.damage((impact - 13) * 9, { attacker: null });
+    if (impact > 12 && !this.freefall) this.damage((impact - 12) * 10, { attacker: null });
     this.model.landKick(Math.min(2, impact / 6));
     this.model.setLoco('land', 0.05);
     const s = this.w.terrain.surfaceAt(this.pos.x, this.pos.z);
@@ -444,6 +491,14 @@ export class Soldier implements Actor {
   syncModel() {
     const r = this.model.root;
     r.position.copy(this.pos);
+    // skydiving pose: body horizontal, steeper when diving, upright under the canopy
+    const inner = this.model.inner;
+    if (inner && this.alive) {
+      const want = this.freefall && !this.parachute ? 1.0 + this.diveK * 0.5 : 0;
+      inner.rotation.x = THREE.MathUtils.lerp(inner.rotation.x, want, 0.12);
+      if (!this.freefall && Math.abs(inner.rotation.x) < 0.02 && inner.rotation.x !== 0 && this.alive) inner.rotation.x = 0;
+      inner.position.y = this.freefall && !this.parachute ? 0.9 : inner.position.y * 0.9;
+    }
     if (this.swimming) r.position.y = Math.min(this.pos.y, this.w.waterLevel - 1.4);
     r.rotation.y = this.yaw;
   }
@@ -533,6 +588,10 @@ export class Soldier implements Actor {
     }
   }
   sprintBoost = 0;
+  slideSpeed = 0;
+  /** 0 = neutral, 1 = full dive (for animation / camera) */
+  diveK = 0;
+  glideSpeed = 0;
 
   tryHeal() { if (this.medkits > 0 && this.health < this.maxHealth) return this.beginBusy('heal', 3.5); if (this.syringes > 0 && this.health < this.maxHealth) return this.beginBusy('syringe', 1.2); return false; }
   tryPlate() { if (this.plates > 0 && this.armorTier > 0 && this.armor < this.armorTier * 50) return this.beginBusy('plate', 1.1 * (this.perks.has('speedcola') ? 0.5 : 1)); return false; }

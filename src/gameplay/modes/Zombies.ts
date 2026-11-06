@@ -70,7 +70,8 @@ export class ZombiesMode extends SoldierMode {
     this.rebuildNav();
     progress(0.75, 'Maschinen');
     this.setupInteractables();
-    const pc = await this.spawnPlayer(new THREE.Vector3(0, ex.y + 0.5, -4), 0);
+    const idx = this.w.net?.myIdx ?? 0;
+    const pc = await this.spawnPlayer(new THREE.Vector3((idx % 4) * 2.2 - 3.3, ex.y + 0.5, -4 - Math.floor(idx / 4) * 2), 0);
     pc.soldier.weapons = [new Weapon('viper', 0), null];
     pc.soldier.perks.clear(); // perks are bought from machines in Zombies
     pc.soldier.current = 0;

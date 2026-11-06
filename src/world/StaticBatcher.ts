@@ -16,8 +16,21 @@ export function batchStatic(group: THREE.Object3D): THREE.Group {
     let g = m.geometry.clone();
     g.applyMatrix4(m.matrixWorld);
     if (!g.index) g.setIndex([...Array(g.getAttribute('position').count).keys()]);
-    // keep a common attribute layout
+    // keep a common attribute layout (float32 everywhere so quantised / normalised attributes merge)
     for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', 'color'].includes(name)) g.deleteAttribute(name);
+    for (const name of Object.keys(g.attributes)) {
+      const a = g.getAttribute(name) as THREE.BufferAttribute;
+      if (a.array instanceof Float32Array && !(a as THREE.BufferAttribute & { isInterleavedBufferAttribute?: boolean }).isInterleavedBufferAttribute) continue;
+      const f = new Float32Array(a.count * a.itemSize);
+      const get = [a.getX, a.getY, a.getZ, a.getW];
+      for (let i = 0; i < a.count; i++) for (let k = 0; k < a.itemSize; k++) f[i * a.itemSize + k] = get[k].call(a, i);
+      g.setAttribute(name, new THREE.BufferAttribute(f, a.itemSize));
+    }
+    if (g.getAttribute('color') && g.getAttribute('color').itemSize === 4) {
+      const c = g.getAttribute('color'); const f = new Float32Array(c.count * 3);
+      for (let i = 0; i < c.count; i++) { f[i * 3] = c.getX(i); f[i * 3 + 1] = c.getY(i); f[i * 3 + 2] = c.getZ(i); }
+      g.setAttribute('color', new THREE.BufferAttribute(f, 3));
+    }
     if (!g.getAttribute('normal')) g.computeVertexNormals();
     const attrs = Object.keys(g.attributes).sort().join(',');
     if (g.morphAttributes && Object.keys(g.morphAttributes).length) g.morphAttributes = {};
