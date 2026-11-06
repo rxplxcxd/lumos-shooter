@@ -28,9 +28,15 @@ export class TouchControls {
     const look = this.root.querySelector('.look') as HTMLElement;
     const btns = this.root.querySelector('.btns') as HTMLElement;
     const layout: [Action, string, number, number, string?][] = [
-      ['fire', 'FEUER', 150, 150, 'fire'], ['ads', 'ZIEL', 60, 190], ['jump', 'SPRUNG', 190, 60], ['crouch', 'DUCK', 100, 60], ['reload', 'R', 10, 110],
-      ['interact', 'NUTZEN', 10, 30], ['grenade', 'GRAN', 190, -20], ['weaponNext', 'WAFFE', 110, -20], ['heal', '✚', -70, 150], ['plate', '🛡', -70, 70], ['sprint', 'SPRINT', -70, -10], ['pause', '❚❚', 190, -100],
+      ['fire', 'FEUER', 196, 176, 'fire'], ['ads', 'ZIEL', 112, 206], ['jump', 'SPRUNG', 212, 92], ['crouch', 'DUCK', 132, 122], ['reload', 'R', 46, 176],
+      ['interact', 'NUTZEN', 52, 96], ['grenade', 'GRAN', 212, 12], ['weaponNext', 'WAFFE', 132, 40], ['heal', '✚', -34, 206], ['plate', '🛡', -34, 130], ['sprint', 'SPRINT', -34, 54],
     ];
+    const pause = document.createElement('div');
+    pause.className = 'tb pause-btn'; pause.textContent = '❚❚';
+    pause.addEventListener('touchstart', (e) => { e.preventDefault(); this.input.press('pause'); }, { passive: false });
+    pause.addEventListener('touchend', (e) => { e.preventDefault(); this.input.release('pause'); }, { passive: false });
+    this.root.appendChild(pause);
+    document.getElementById('ui')?.classList.add('touch-mode');
     for (const [a, label, x, y, cls] of layout) {
       const b = document.createElement('div');
       b.className = 'tb' + (cls ? ' ' + cls : '');
@@ -82,5 +88,5 @@ export class TouchControls {
     this.input.touch.moveY = -ny / max;
   }
   setVisible(v: boolean) { this.root.classList.toggle('hidden', !v); }
-  dispose() { this.root.remove(); }
+  dispose() { this.root.remove(); document.getElementById('ui')?.classList.remove('touch-mode'); }
 }

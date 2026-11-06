@@ -50,7 +50,9 @@ export class Multiplayer extends SoldierMode {
     progress(0.75, 'Teams');
     const team = (i: number) => (this.sub === 'ffa' ? i : i % 2);
     const pc = await this.spawnPlayer(this.spawnPoint(0), 0);
-    void pc;
+    pc.yaw = Math.PI; // face the enemy side
+    const lanes: THREE.Vector3[] = [];
+    for (const x of [-52, -18, 0, 18, 52]) for (const z of [-70, -35, 0, 35, 70]) lanes.push(new THREE.Vector3(x, 5, z));
     const total = perTeam * 2 - 1;
     for (let i = 1; i <= total; i++) {
       const t = team(i);
@@ -59,6 +61,8 @@ export class Multiplayer extends SoldierMode {
       b.roamRadius = 90;
       b.home.set(0, 0, 0);
       b.aggressive = 0.8;
+      b.waypoints = lanes;
+      b.pickRoam();
     }
     if (this.sub === 'ctf') await this.setupFlags();
     if (this.sub === 'snd') this.setupBombSites();

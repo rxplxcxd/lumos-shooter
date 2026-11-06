@@ -39,6 +39,7 @@ export class HUD {
     this.mapCtx = this.mapCanvas.getContext('2d')!;
     add('killfeed', 'killfeed');
     add('scope', 'scope hidden');
+    add('reticle', 'reticle hidden');
     add('cross', 'crosshair', '<i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><i class="dot"></i>');
     add('hit', 'hitmarker');
     add('dmg', 'dmg-dir');
@@ -193,6 +194,10 @@ export class HUD {
     (ch.children[0] as HTMLElement).style.top = `${-px - 8}px`; (ch.children[1] as HTMLElement).style.top = `${px}px`;
     (ch.children[2] as HTMLElement).style.left = `${-px - 8}px`; (ch.children[3] as HTMLElement).style.left = `${px}px`;
     this.els.scope.classList.toggle('hidden', !(wp.stats.scope && s.ads > 0.92 && !p.thirdPerson));
+    const optic = wp.attachments.find((a) => a === 'reddot' || a === 'acog' || a === 'thermal');
+    const ret = this.els.reticle;
+    ret.classList.toggle('hidden', !(optic && !wp.stats.scope && s.ads > 0.8 && !p.thirdPerson && s.alive));
+    ret.className = `reticle ${optic ?? ''}${ret.classList.contains('hidden') ? ' hidden' : ''}`;
     // throttled DOM updates
     this.uiAccum += dt;
     if (this.uiAccum < 0.1) return;

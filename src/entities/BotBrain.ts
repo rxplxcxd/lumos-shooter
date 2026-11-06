@@ -37,6 +37,9 @@ export class BotBrain {
   roamRadius = 400;
   home = new THREE.Vector3();
   aggressive = 0.6;
+  /** optional patrol points (MP lanes / objectives) */
+  waypoints: THREE.Vector3[] | null = null;
+  lastIntent: Intent | null = null;
 
   constructor(s: Soldier, w: GameWorld, skill = 0.5) {
     this.s = s; this.w = w; this.skill = skill;
@@ -45,6 +48,7 @@ export class BotBrain {
   }
 
   pickRoam() {
+    if (this.waypoints?.length) { this.goal.copy(this.waypoints[Math.floor(rng.next() * this.waypoints.length)]).add(new THREE.Vector3(rng.range(-6, 6), 0, rng.range(-6, 6))); return; }
     const m = this.w.mode as any;
     const z = m?.zoneTarget?.();
     if (z && rng.chance(0.6)) {
@@ -152,6 +156,7 @@ export class BotBrain {
       }
     }
     intent.yaw = this.yaw; intent.pitch = this.pitch;
+    this.lastIntent = intent;
     // physics LOD: far bots skip the character controller
     const pd = w.player ? s.pos.distanceTo(w.player.soldier.pos) : 0;
     s.physicsLOD = pd > 140 && !s.freefall;

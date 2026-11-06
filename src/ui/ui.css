@@ -165,6 +165,11 @@ select, input { background: var(--panel-2); color: var(--text); border: 1px soli
 .scope::before, .scope::after { content: ''; position: absolute; background: #000; }
 .scope::before { left: 50%; top: 18vh; bottom: 18vh; width: 2px; margin-left: -1px; }
 .scope::after { top: 50%; left: calc(50% - 32vh); right: calc(50% - 32vh); height: 2px; margin-top: -1px; }
+.reticle { left: 50%; top: 50%; width: 0; height: 0; }
+.reticle::before { content: ''; position: absolute; left: -3px; top: -3px; width: 6px; height: 6px; border-radius: 50%; background: #ff2a2a; box-shadow: 0 0 6px #ff2a2a; }
+.reticle::after { content: ''; position: absolute; left: -46px; top: -46px; width: 92px; height: 92px; border-radius: 50%; border: 2px solid rgba(20, 20, 20, 0.55); box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.0); }
+.reticle.acog::before, .reticle.thermal::before { width: 0; height: 0; left: -8px; top: -2px; border-radius: 0; background: transparent; border-left: 8px solid transparent; border-right: 8px solid transparent; border-bottom: 12px solid #ff3a1a; box-shadow: none; }
+.reticle.acog::after, .reticle.thermal::after { left: -160px; top: -160px; width: 320px; height: 320px; border: 26px solid rgba(8, 10, 12, 0.92); box-shadow: 0 0 0 2000px rgba(0, 0, 0, 0.88); }
 .fps { left: 8px; top: 2px; font-size: 12px; color: var(--muted); font-family: monospace; }
 .end { inset: 0; display: grid; place-items: center; background: rgba(5, 8, 12, 0.75); pointer-events: auto; }
 .end .box { text-align: center; }
@@ -182,7 +187,28 @@ select, input { background: var(--panel-2); color: var(--text); border: 1px soli
 .touch .stick { position: absolute; left: 4vw; bottom: 6vh; width: 150px; height: 150px; border-radius: 50%; background: rgba(255, 255, 255, 0.07); border: 2px solid rgba(255, 255, 255, 0.18); pointer-events: auto; }
 .touch .stick i { position: absolute; left: 50%; top: 50%; width: 62px; height: 62px; margin: -31px 0 0 -31px; border-radius: 50%; background: rgba(255, 255, 255, 0.25); }
 .touch .look { position: absolute; right: 0; top: 0; width: 55vw; height: 100%; pointer-events: auto; }
-.touch .btns { position: absolute; right: 3vw; bottom: 5vh; width: 260px; height: 260px; pointer-events: none; }
+.touch .btns { position: absolute; right: 2vw; bottom: 3vh; width: 290px; height: 280px; pointer-events: none; }
+.touch .pause-btn { position: absolute; top: 8px; right: 150px; width: 46px; height: 46px; }
+/* touch layout: keep HUD clear of the virtual controls */
+.touch-mode .minimap { width: 118px; height: 118px; right: 12px; top: 10px; }
+.touch-mode .killfeed { right: 140px; top: 64px; font-size: 12px; }
+.touch-mode .ammo { right: auto; left: 50%; transform: translateX(-50%); bottom: auto; top: 54px; text-align: center; }
+.touch-mode .ammo .count { font-size: 28px; }
+.touch-mode .ammo .slots { justify-content: center; }
+.touch-mode .vitals { left: 50%; transform: translateX(-50%); bottom: 10px; width: 240px; }
+.touch-mode .vitals .items { font-size: 12px; justify-content: center; }
+.touch-mode .vitals .items .glyph { display: none; }
+.touch-mode .scores { top: 8px; font-size: 16px; }
+.touch-mode .topinfo .big { font-size: 20px; }
+.touch-mode .compass { display: none; }
+.touch-mode .round { bottom: auto; top: 90px; left: 20px; font-size: 40px; }
+.touch-mode .points { right: auto; left: 20px; bottom: auto; top: 140px; font-size: 18px; }
+.touch-mode .prompt { top: 40% !important; }
+.touch-mode .vehicle-hud { bottom: 60px; }
 .touch .tb { position: absolute; width: 64px; height: 64px; border-radius: 50%; background: rgba(255, 255, 255, 0.12); border: 2px solid rgba(255, 255, 255, 0.28); color: #fff; font: 700 13px var(--font-head); display: grid; place-items: center; pointer-events: auto; }
 .touch .tb.fire { width: 88px; height: 88px; background: rgba(255, 77, 77, 0.25); border-color: rgba(255, 120, 120, 0.6); }
 .touch .tb.on { background: rgba(255, 181, 46, 0.4); }
+@media (max-height: 520px) {
+  .touch .btns { transform: scale(0.8); transform-origin: bottom right; }
+  .touch .stick { transform: scale(0.85); transform-origin: bottom left; }
+}

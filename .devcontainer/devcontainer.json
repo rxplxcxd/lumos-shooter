@@ -1,0 +1,13 @@
+{
+  "name": "Lumos Strike",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "postCreateCommand": "npm install",
+  "postAttachCommand": "echo 'Start the game with: npm run dev  (opens port 5173)'",
+  "forwardPorts": [5173, 8787, 4173],
+  "portsAttributes": {
+    "5173": { "label": "Lumos Strike (Vite)", "onAutoForward": "openPreview" },
+    "8787": { "label": "Realtime server" },
+    "4173": { "label": "Production preview" }
+  },
+  "customizations": { "vscode": { "extensions": ["dbaeumer.vscode-eslint", "esbenp.prettier-vscode"] } }
+}

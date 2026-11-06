@@ -485,9 +485,9 @@ export class PlayerController {
     this.swayY = THREE.MathUtils.lerp(this.swayY, inp.lookY * 0.00035, dt * 10);
     this.vmKick = Math.max(0, this.vmKick - dt * 7);
     const len = wp.def.length;
-    const hip = new THREE.Vector3(0.16 + len * 0.05, -0.15 - len * 0.03, -0.28 - len * 0.32);
+    const hip = new THREE.Vector3(0.15 + len * 0.05, -0.15 - len * 0.03, -0.3 - len * 0.42);
     const sightY = this.vmGun.userData.sightY as number;
-    const adsP = new THREE.Vector3(0, -0.035 - sightY * 0.55, -0.2 - len * 0.3);
+    const adsP = new THREE.Vector3(0, -0.035 - sightY * 0.55, -0.26 - len * 0.48);
     const p = hip.lerp(adsP, s.ads);
     p.x += bobX + this.swayX; p.y += bobY + this.swayY;
     p.z += this.vmKick * 0.06;
@@ -497,6 +497,9 @@ export class PlayerController {
     if (this.inspectT > 0) { this.inspectT -= dt; const k = Math.sin((1 - this.inspectT / 2.2) * Math.PI); r.y += k * 1.2; r.z += k * 0.5; p.x -= k * 0.08; }
     if (s.busyT > 0) { p.y -= 0.25; }
     if (wp.def.cls === 'melee') { r.x += -0.4 + this.vmKick * 1.2; p.z -= this.vmKick * 0.15; }
+    // look *through* optics: hide the opaque optic model while aiming (HUD draws the reticle)
+    const optic = this.vmGun.getObjectByName('att_optic');
+    if (optic) optic.visible = s.ads < 0.8;
     this.vmGun.position.lerp(p, Math.min(1, dt * 18));
     this.vmGun.rotation.set(r.x, r.y, r.z);
     // consumable item while healing / plating

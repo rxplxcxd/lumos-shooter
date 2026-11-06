@@ -209,24 +209,34 @@ export class GameWorld {
     const box = new THREE.Box3().setFromObject(g);
     g.userData.muzzle = new THREE.Vector3(0, box.max.y * 0.35, box.max.z);
     g.userData.box = box;
-    // gunsmith attachments from the Quaternius accessory kit
+    // gunsmith attachments from the Quaternius accessory kit (modelled along +X like the guns)
+    const len = w.def.length;
     for (const id of w.attachments) {
       const a = attachmentById(id);
       if (!a?.piece) continue;
       try {
         const piece = await this.assets.kitPiece('attachments', a.piece);
-        const s = piece.userData.size as THREE.Vector3;
         const inner = new THREE.Group(); inner.add(piece); inner.rotation.y = -Math.PI / 2;
-        const len = w.def.length;
-        const target = a.slot === 'optic' ? len * 0.32 : a.slot === 'muzzle' ? len * 0.25 : a.slot === 'underbarrel' ? len * 0.15 : len * 0.22;
-        inner.scale.setScalar(target / Math.max(s.x, s.z, 1e-3));
-        const m = new THREE.Group(); m.add(inner);
-        if (a.slot === 'optic') m.position.set(0, box.max.y + 0.01, box.getCenter(new THREE.Vector3()).z + len * 0.05);
-        else if (a.slot === 'muzzle') { m.position.set(0, box.max.y * 0.35, box.max.z + target * 0.45); g.userData.muzzle.z += target * 0.9; }
-        else if (a.slot === 'underbarrel') m.position.set(0, box.min.y + 0.02, box.max.z - len * 0.3);
-        else if (a.slot === 'laser') m.position.set(0.035, box.max.y * 0.2, box.max.z - len * 0.25);
-        else if (a.slot === 'stock') m.position.set(0, box.max.y * 0.1, box.min.z - target * 0.4);
-        g.add(m);
+        const holder = new THREE.Group(); holder.add(inner);
+        holder.updateMatrixWorld(true);
+        const raw = new THREE.Box3().setFromObject(holder);
+        const rs = raw.getSize(new THREE.Vector3());
+        const target = a.slot === 'optic' ? len * 0.3 : a.slot === 'muzzle' ? len * 0.28 : a.slot === 'underbarrel' ? len * 0.14 : a.slot === 'stock' ? len * 0.3 : len * 0.18;
+        const k = target / Math.max(rs.x, rs.y, rs.z, 1e-4);
+        holder.scale.setScalar(k);
+        holder.updateMatrixWorld(true);
+        const ab = new THREE.Box3().setFromObject(holder);
+        const ac = ab.getCenter(new THREE.Vector3());
+        const off = new THREE.Vector3(-ac.x, 0, -ac.z);
+        if (a.slot === 'optic') off.add(new THREE.Vector3(0, box.max.y - ab.min.y - 0.004, box.max.z * 0.05));
+        else if (a.slot === 'muzzle') { off.add(new THREE.Vector3(0, box.max.y * 0.35 - ac.y, box.max.z + (ab.max.z - ab.min.z) * 0.45)); g.userData.muzzle.z += ab.max.z - ab.min.z; }
+        else if (a.slot === 'underbarrel') off.add(new THREE.Vector3(0, box.min.y - ab.max.y + 0.01, box.max.z - len * 0.3));
+        else if (a.slot === 'laser') off.add(new THREE.Vector3(box.max.x + 0.01 - ab.min.x, box.max.y * 0.1 - ac.y, box.max.z - len * 0.28));
+        else if (a.slot === 'stock') off.add(new THREE.Vector3(0, -ac.y, box.min.z - (ab.max.z - ab.min.z) * 0.4));
+        holder.position.copy(off);
+        holder.userData.slot = a.slot;
+        holder.name = 'att_' + a.slot;
+        g.add(holder);
       } catch { /* missing piece */ }
     }
     g.traverse((o) => { if ((o as THREE.Mesh).isMesh) { o.castShadow = true; } });

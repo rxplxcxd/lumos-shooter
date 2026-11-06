@@ -420,7 +420,13 @@ export async function buildZombieOutpost(w: GameWorld, seed: number, progress: P
   for (const r of radios) await mb.place('item_ammo', r.x, r.z, 0, { collider: 'none', batch: false, y: y + 0.9, scale: 0.6 });
   mb.flush();
   // surroundings: dead forest and fog
-  await mb.scatterKit(['DeadTree_1', 'DeadTree_2', 'DeadTree_3', 'TwistedTree_1'], 220, { avoid: [{ x: 0, z: 0, r: 55 }], collider: 0.4, scale: [0.9, 1.5], area: 160 });
+  await mb.scatterKit(['Pine_5', 'CommonTree_5', 'DeadTree_3'], 120, { avoid: [{ x: 0, z: 0, r: 55 }], collider: 0.4, scale: [0.9, 1.5], area: 160 });
+  // warm work lights inside the outpost rooms (cheap: 5 point lights)
+  for (const r of rooms) {
+    const l = new THREE.PointLight(r.id === 'spawn' ? 0xffc27a : 0xff9a5a, 28, 30, 1.6);
+    l.position.set(r.x, y + 5, r.z);
+    w.root.add(l);
+  }
   await mb.scatterKit(['Rock_Medium_1', 'Rock_Medium_3', 'Mushroom_Common'], 120, { avoid: [{ x: 0, z: 0, r: 50 }], scale: [1, 2.5], area: 160 });
   return {
     name: 'Outpost 9', pois: [{ id: 'outpost', name: 'Outpost 9', x: 0, z: 0, r: 50, h: y, tier: 1 }], lootSpots: [], spawnPoints: [new THREE.Vector3(0, y + 0.5, 0)], bounds: 160,

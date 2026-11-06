@@ -67,9 +67,16 @@ export class CharacterModel {
     if (!clipCache) clipCache = buildClipSet(await assets.characterClips());
   }
 
+  /** models with their own skeleton + clips (e.g. Sketchfab hazmat zombie): state -> clip name */
+  private own: Record<string, string> | null = null;
+
   async init(assets: AssetManager, modelId: string, tint?: number, extraClips?: THREE.AnimationClip[]) {
     await CharacterModel.preload(assets);
     this.inner = await assets.instance(modelId);
+    const ownClips: THREE.AnimationClip[] = this.inner.userData.animations ?? [];
+    if (modelId === 'zombie_hazmat' && ownClips.length) {
+      this.own = { zombieWalk: 'Zombie_Walk_Root', zombieRun: 'Zombie_Walk_Root', zombieIdle: 'Zombie_Idle', idle: 'Zombie_Idle', zombieAttack: 'Zombie_Skill', dead: 'Zombie_EnemySpotted', downed: 'Zombie_Idle' };
+    }
     this.inner.rotation.y = this.facingFix;
     this.root.add(this.inner);
     this.inner.traverse((o) => {
@@ -93,6 +100,17 @@ export class CharacterModel {
       if (o.name === 'Head') this.head = o;
     });
     this.mixer = new THREE.AnimationMixer(this.inner);
+    if (this.own) {
+      for (const c of ownClips) {
+        // strip root translation so the walk cycle stays in place
+        const clip = c.clone();
+        clip.tracks = clip.tracks.filter((t) => !(t.name.endsWith('.position') && /root|hips|pelvis|armature/i.test(t.name)));
+        this.lowerActions.set(c.name, this.mixer.clipAction(clip));
+      }
+      this.setLoco('zombieWalk', 0);
+      this.ready = true;
+      return this;
+    }
     const set = clipCache!;
     for (const [name, clip] of set.lower) {
       const a = this.mixer.clipAction(clip);
@@ -125,6 +143,14 @@ export class CharacterModel {
   }
 
   setLoco(s: LocoState, fade = 0.2, speed = 1) {
+    if (this.own) {
+      if (s === this.loco && this.curLower) { this.curLower.timeScale = speed; return; }
+      this.loco = s;
+      const name = this.own[s] ?? this.own.zombieWalk;
+      this.curLower = this.play(this.lowerActions, name, this.curLower, fade, speed);
+      if (s === 'dead' && this.curLower) { this.curLower.setLoop(THREE.LoopOnce, 1); this.curLower.clampWhenFinished = true; }
+      return;
+    }
     if (s === this.loco && this.curLower) { this.curLower.timeScale = speed; if (this.upper === 'none' && this.curUpper) this.curUpper.timeScale = speed; return; }
     this.loco = s;
     const clip = LOCO_CLIPS[s];
@@ -134,6 +160,7 @@ export class CharacterModel {
 
   /** upper body override; duration>0 returns to `none` (or aim/hold) after that time */
   setUpper(s: UpperState, fade = 0.12, duration = 0, speed = 1) {
+    if (this.own) { if (s === 'zombieAttack') { const a = this.lowerActions.get(this.own.zombieAttack); if (a) { a.reset().setLoop(THREE.LoopOnce, 1).play(); a.weight = 1; } } return; }
     if (s === this.upper && duration === 0) return;
     this.upper = s;
     this.upperTimer = duration;

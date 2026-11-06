@@ -74,7 +74,6 @@ export const MODELS: Record<string, ModelDef> = {
   char_hero_m: { file: 'characters/hero_m', height: 1.82, keepOrigin: true },
   char_hero_f: { file: 'characters/hero_f', height: 1.76, keepOrigin: true },
   zombie_hazmat: { file: 'zombies/hazmat', height: 1.8, keepOrigin: true },
-  zombie_ripper: { file: 'zombies/ripper', height: 1.9, keepOrigin: true },
 
   // ---------------------------------------------------------------- items
   item_medkit: { file: 'items/medkit', length: 0.5 },
@@ -102,7 +101,6 @@ export const MODELS: Record<string, ModelDef> = {
   env_mysterybox: { file: 'env/mysterybox', width: 1.5 },
   env_rocks: { file: 'env/rocks', width: 4 },
   env_sandbag: { file: 'env/sandbags', length: 0.9 },
-  env_pines: { file: 'env/trees2', height: 9 },
 };
 
 /** Kits: one GLB with many named top-level pieces (CC0 Quaternius packs). */
