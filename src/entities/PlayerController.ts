@@ -1,0 +1,534 @@
+import * as THREE from 'three';
+import { Soldier, type Intent } from './Soldier';
+import type { GameWorld, Interactable } from '../gameplay/GameWorld';
+import { settings } from '../core/Settings';
+import type { Vehicle, VehicleControls } from '../vehicles/Vehicle';
+import { Grenade } from '../weapons/Grenade';
+import type { Actor } from '../gameplay/types';
+import type { Weapon } from '../weapons/Weapon';
+
+const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3();
+
+/**
+ * Local player: input -> Soldier, FPS/TPS cameras, view-model with procedural sway/bob/recoil/
+ * reload/inspect, ADS + scopes, leaning, grenades with arc preview, vehicles, freefall/parachute,
+ * aim assist (gamepad), haptics, interaction prompts.
+ */
+export class PlayerController {
+  w: GameWorld;
+  soldier: Soldier;
+  yaw = 0;
+  pitch = 0;
+  thirdPerson = settings.data.thirdPerson;
+  recoilP = 0; recoilY = 0;
+  private shakeAmt = 0;
+  private bobT = 0;
+  private vm = new THREE.Group(); // view-model root
+  private vmGun: THREE.Object3D | null = null;
+  private vmKey = '';
+  private vmKick = 0;
+  private vmItem: THREE.Object3D | null = null;
+  private inspectT = 0;
+  private swayX = 0; private swayY = 0;
+  private arc: THREE.Line;
+  private grenadeHeld = false;
+  private grenadeCook = 0;
+  private grenadeMesh: THREE.Object3D | null = null;
+  focus: Interactable | null = null;
+  focusVehicle: Vehicle | null = null;
+  vehCamYaw = 0; vehCamPitch = -0.15;
+  nvg = false;
+  spectateTarget: Actor | null = null;
+  private burstQueue = 0;
+  private burstT = 0;
+  private holdT = 0;
+  inPlane = false;
+  private flashlight: THREE.SpotLight;
+  private parachuteMesh: THREE.Object3D | null = null;
+  lockedControls = false;
+
+  constructor(w: GameWorld, soldier: Soldier) {
+    this.w = w;
+    this.soldier = soldier;
+    soldier.isPlayer = true;
+    const ov = w.engine.overlay;
+    ov.clear();
+    ov.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.6));
+    const dl = new THREE.DirectionalLight(0xffffff, 1.4); dl.position.set(1, 2, 1); ov.add(dl);
+    ov.add(this.vm);
+    const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+    this.arc = new THREE.Line(g, new THREE.LineDashedMaterial({ color: 0xffe08a, dashSize: 0.3, gapSize: 0.18, transparent: true, opacity: 0.9 }));
+    this.arc.frustumCulled = false; this.arc.visible = false;
+    w.scene.add(this.arc);
+    this.flashlight = new THREE.SpotLight(0xfff2d0, 0, 45, 0.45, 0.5, 1.2);
+    w.scene.add(this.flashlight, this.flashlight.target);
+    w.assets.instance('w_grenade').then((m) => { this.grenadeMesh = m; });
+    w.assets.instance('item_parachute').then((m) => { this.parachuteMesh = m; m.visible = false; w.scene.add(m); });
+  }
+
+  forward(out = new THREE.Vector3()) {
+    return out.set(0, 0, -1).applyEuler(new THREE.Euler(this.pitch + this.recoilP, this.yaw + this.recoilY, 0, 'YXZ'));
+  }
+
+  shake(a: number) { this.shakeAmt = Math.min(2, this.shakeAmt + a); }
+
+  get adsFovTarget() {
+    const s = this.soldier.weapon.stats;
+    return THREE.MathUtils.lerp(settings.data.fov, s.adsFov * (settings.data.fov / 80), this.soldier.ads);
+  }
+
+  update(dt: number) {
+    const s = this.soldier, inp = this.w.input, w = this.w;
+    // ------------------------------------------------------------- look
+    const adsMul = s.ads > 0.5 ? settings.data.adsSensMul * (s.weapon.stats.adsFov / 55) : 1;
+    let sens = 0.0022 * (inp.device === 'gamepad' ? settings.data.padSens : settings.data.mouseSens) * adsMul;
+    if (inp.device === 'gamepad' && settings.data.aimAssist && this.aimAssistTarget()) sens *= 0.55;
+    const lx = inp.lookX * sens, ly = inp.lookY * sens * (settings.data.invertY ? -1 : 1);
+    if (s.inVehicle) {
+      this.vehCamYaw -= lx; this.vehCamPitch = THREE.MathUtils.clamp(this.vehCamPitch - ly, -1.2, 0.6);
+      this.yaw = this.vehCamYaw; this.pitch = this.vehCamPitch;
+    } else if (s.alive) {
+      this.yaw -= lx;
+      this.pitch = THREE.MathUtils.clamp(this.pitch - ly, -1.45, 1.45);
+    }
+    // recoil recovery
+    this.recoilP *= Math.max(0, 1 - dt * 7); this.recoilY *= Math.max(0, 1 - dt * 7);
+
+    if (!s.alive) { this.updateDeathCam(dt); return; }
+    if (this.inPlane || this.lockedControls) { this.updateCamera(dt); return; }
+
+    // ------------------------------------------------------------- vehicles
+    if (s.inVehicle) { this.vehicleInput(dt, s.inVehicle); this.updateCamera(dt); this.updateViewModel(dt); return; }
+
+    // ------------------------------------------------------------- movement intent
+    const fwd = tmp.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+    const right = tmp2.set(-fwd.z, 0, fwd.x);
+    const move = new THREE.Vector3().addScaledVector(fwd, inp.moveY).addScaledVector(right, inp.moveX);
+    if (move.lengthSq() > 1) move.normalize();
+    const intent: Intent = {
+      move, sprint: inp.held('sprint') || (inp.device === 'touch' && inp.moveY > 0.92), crouch: inp.held('crouch'), jump: inp.pressed('jump'),
+      yaw: this.yaw + Math.PI, pitch: this.pitch,
+    };
+    if (inp.device === 'gamepad' && inp.pressed('sprint')) this.toggleSprint = !this.toggleSprint;
+    if (inp.device === 'gamepad') intent.sprint = this.toggleSprint && inp.moveY > 0.3;
+    if (inp.moveY < 0.2) this.toggleSprint = false;
+    // freefall / parachute
+    if (s.freefall) {
+      intent.crouch = false; intent.jump = false;
+      const agl = s.pos.y - Math.max(w.terrain.getHeight(s.pos.x, s.pos.z), w.waterLevel);
+      this.freefallT += dt;
+      if (!s.parachute && ((inp.pressed('jump') && this.freefallT > 0.8) || agl < 130)) { s.parachute = true; w.audio.play('wind_loop', { volume: 0.3 }); w.bus.emit('parachute', s); }
+    }
+    if (!s.freefall) this.freefallT = 0;
+    s.move(dt, intent);
+    // leaning
+    const leanT = s.grounded && !s.sprinting ? (inp.held('leanR') ? 1 : 0) - (inp.held('leanL') ? 1 : 0) : 0;
+    s.leaning = THREE.MathUtils.lerp(s.leaning, leanT, Math.min(1, dt * 10));
+
+    // ------------------------------------------------------------- interaction
+    this.updateInteraction(dt);
+
+    // ------------------------------------------------------------- weapons
+    if (inp.pressed('slot1')) s.switchWeapon(0);
+    if (inp.pressed('slot2')) s.switchWeapon(1);
+    if (inp.pressed('slot3') || inp.pressed('melee')) { if (inp.pressed('melee')) this.melee(); else s.switchWeapon(2); }
+    if (inp.pressed('weaponNext') || inp.pressed('weaponPrev')) {
+      const order = [0, 1, 2].filter((i) => i === 2 || s.weapons[i]);
+      const idx = order.indexOf(s.current);
+      s.switchWeapon(order[(idx + (inp.pressed('weaponPrev') ? order.length - 1 : 1)) % order.length]);
+    }
+    const busy = s.busyT > 0 || s.climbing > 0 || s.swimming || s.freefall;
+    const canAds = !busy && !s.sprinting && s.weapon.def.cls !== 'melee' && !s.downed;
+    s.adsHeld = inp.held('ads') && canAds;
+    const adsSpeed = 1 / Math.max(0.08, s.weapon.stats.adsTime);
+    s.ads = THREE.MathUtils.clamp(s.ads + (s.adsHeld ? 1 : -1) * dt * adsSpeed, 0, 1);
+    if (inp.pressed('reload') && !(this.focus && inp.device === 'gamepad')) s.startReload();
+    if (inp.pressed('inspect')) this.inspectT = 2.2;
+    if (inp.pressed('heal')) s.tryHeal();
+    if (inp.pressed('plate')) s.tryPlate();
+    if (inp.pressed('nvg')) { this.nvg = !this.nvg; w.audio.ui(this.nvg ? 'popup_open' : 'popup_close'); }
+    if (inp.pressed('camera')) { this.thirdPerson = !this.thirdPerson; settings.set('thirdPerson', this.thirdPerson); }
+    if (inp.pressed('emote')) s.model.setLoco('dance', 0.3);
+    s.updateWeapon(dt);
+    if (!busy) this.handleFire(dt);
+    this.handleGrenade(dt);
+    // auto reload when empty
+    if (s.weapon.ammo === 0 && s.weapon.reloading <= 0 && s.weapon.def.cls !== 'melee' && !inp.held('fire')) s.startReload();
+    // thermal optic / NVG post FX
+    const thermal = s.weapon.stats.thermal && s.ads > 0.85;
+    w.engine.setPost(s.underwater ? 'underwater' : thermal ? 'thermal' : this.nvg ? 'nvg' : 'none');
+    // weapon light at night
+    const light = s.weapon.attachments.includes('flashlight') || w.sky.isNight;
+    this.flashlight.intensity = light && !this.thirdPerson ? 60 : 0;
+    this.updateCamera(dt);
+    this.updateViewModel(dt);
+    // parachute visual
+    if (this.parachuteMesh) {
+      this.parachuteMesh.visible = s.parachute;
+      if (s.parachute) { this.parachuteMesh.position.copy(s.pos).add(new THREE.Vector3(0, 2.6, 0)); this.parachuteMesh.rotation.y = s.yaw; this.parachuteMesh.scale.setScalar(0.75); }
+    }
+  }
+  private toggleSprint = false;
+  private freefallT = 0;
+
+  // ----------------------------------------------------------------- firing
+  private handleFire(dt: number) {
+    const s = this.soldier, inp = this.w.input;
+    const wp = s.weapon;
+    if (wp.def.cls === 'melee') { if (inp.pressed('fire')) this.melee(); return; }
+    if (s.downed && wp.def.cls !== 'pistol') return;
+    if (s.sprinting && inp.held('fire')) { s.sprinting = false; }
+    const trigger = wp.stats.auto ? inp.held('fire') : inp.pressed('fire');
+    if (this.burstQueue > 0) {
+      this.burstT -= dt;
+      if (this.burstT <= 0 && wp.canFire()) { this.fireOnce(); this.burstQueue--; this.burstT = wp.interval; }
+      return;
+    }
+    if (trigger && wp.canFire()) {
+      if (wp.def.burst) { this.burstQueue = wp.def.burst - 1; this.burstT = wp.interval; }
+      this.fireOnce();
+    } else if (inp.pressed('fire') && wp.ammo <= 0 && wp.reloading <= 0) {
+      this.w.audio.play('ui_cursor', { volume: 0.4 });
+      s.startReload();
+    }
+  }
+
+  private fireOnce() {
+    const s = this.soldier, w = this.w, wp = s.weapon, st = wp.stats;
+    wp.cooldown = wp.interval * (s.perks.has('doubletap') ? 0.75 : 1);
+    if (!w.mode?.infiniteAmmo || true) wp.ammo--;
+    s.lastShotTime = w.time;
+    if (st.silenced) s.silencedUntil = w.time + 0.1; else s.silencedUntil = 0;
+    const cam = w.engine.camera;
+    const origin = cam.getWorldPosition(new THREE.Vector3());
+    const moving = Math.min(1, Math.hypot(s.vel.x, s.vel.z) / 4);
+    const spreadDeg = wp.spread(s.ads, moving, !s.grounded && !s.swimming, s.crouching);
+    const pellets = st.pellets ?? 1;
+    const aimDir = this.forward();
+    // aim assist "bullet magnetism" for controller hip/ADS fire (small)
+    const assist = w.input.device !== 'keyboard' && settings.data.aimAssist ? this.aimAssistTarget() : null;
+    if (assist && s.ads > 0.5) {
+      const to = assist.eyePos(new THREE.Vector3()).add(new THREE.Vector3(0, -0.35, 0)).sub(origin).normalize();
+      aimDir.lerp(to, 0.35).normalize();
+    }
+    const muzzleWorld = this.muzzleWorld();
+    for (let i = 0; i < pellets; i++) {
+      const d = aimDir.clone();
+      const ang = THREE.MathUtils.degToRad(spreadDeg) * Math.sqrt(Math.random());
+      const rot = Math.random() * Math.PI * 2;
+      const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+      const rt = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+      d.addScaledVector(rt, Math.cos(rot) * Math.tan(ang)).addScaledVector(up, Math.sin(rot) * Math.tan(ang)).normalize();
+      w.ballistics.fire(s, origin, d, st, { tracer: i === 0, pellet: pellets > 1 });
+      if (i === 0) w.effects.tracer(muzzleWorld, origin.clone().addScaledVector(d, 40), 0xfff0b0);
+    }
+    w.effects.muzzle(muzzleWorld, aimDir, st.cls === 'shotgun' || st.cls === 'launcher', st.silenced);
+    const snd = st.silenced ? 'suppressed' : st.sound;
+    w.audio.play(snd, { volume: st.silenced ? 0.5 : 0.85 });
+    if (st.cls === 'shotgun' || st.cls === 'sniper') setTimeout(() => w.audio.play(st.cls === 'shotgun' ? 'shotgun_pump' : 'sniper_bolt', { volume: 0.5 }), 350);
+    // recoil
+    const crouchK = s.crouching ? 0.75 : 1;
+    const adsK = 1 - s.ads * 0.35;
+    this.recoilP += THREE.MathUtils.degToRad(st.recoilV) * crouchK * adsK * 0.45;
+    this.pitch += THREE.MathUtils.degToRad(st.recoilV) * crouchK * adsK * 0.55;
+    this.recoilY += THREE.MathUtils.degToRad((Math.random() - 0.5) * 2 * st.recoilH) * crouchK;
+    wp.bloom = Math.min(wp.bloom + (st.cls === 'smg' ? 0.25 : 0.4) * (1 - s.ads * 0.7), 6);
+    this.vmKick = Math.min(1, this.vmKick + (st.cls === 'shotgun' || st.cls === 'sniper' || st.cls === 'launcher' ? 1 : 0.45));
+    if (st.cls !== 'pistol') this.shake(st.cls === 'launcher' || st.cls === 'shotgun' ? 0.25 : 0.05);
+    w.input.rumble(st.cls === 'shotgun' || st.cls === 'sniper' ? 0.8 : 0.25, 0.4, st.cls === 'smg' ? 40 : 80);
+    s.model.setUpper('shoot', 0.02, 0.15);
+    w.bus.emit('playerFired', s);
+  }
+
+  private melee() {
+    const s = this.soldier, w = this.w;
+    if (s.knife.cooldown > 0) return;
+    s.knife.cooldown = 0.6;
+    s.model.setUpper('melee', 0.05, 0.45);
+    this.vmKick = 1;
+    w.audio.play('knife', { volume: 0.7 });
+    const eye = s.eyePos(new THREE.Vector3());
+    const dir = this.forward();
+    let best: Actor | null = null, bd = 2.6;
+    for (const a of w.actorsNear(eye, 3)) {
+      if (a === s) continue;
+      const h = a.hitTest(eye, dir, 2.6);
+      if (h && h.dist < bd) { bd = h.dist; best = a; }
+      else if (!h && a.pos.distanceTo(s.pos) < 1.6) { best = best ?? a; }
+    }
+    if (best && (best.team !== s.team || best.kind === 'zombie')) {
+      const behind = new THREE.Vector3(Math.sin(best.yaw), 0, Math.cos(best.yaw)).dot(dir.clone().setY(0).normalize()) > 0.5;
+      const dmg = (behind ? 200 : s.knife.stats.damage) * (s.perks.has('muscle') ? 2 : 1);
+      const dealt = best.damage(dmg, { attacker: s, weapon: 'knife', melee: true, dir, zone: 'body' });
+      w.onPlayerHit(best, dealt, 'body', !best.alive);
+      w.effects.impact(best.pos.clone().setY(best.pos.y + 1.2), dir.clone().negate(), 'flesh');
+    }
+  }
+
+  private handleGrenade(dt: number) {
+    const s = this.soldier, inp = this.w.input, w = this.w;
+    if (inp.pressed('grenade') && s.grenades > 0 && s.busyT <= 0 && !s.downed) { this.grenadeHeld = true; this.grenadeCook = 0; w.audio.play('grenade_pin', { volume: 0.6 }); }
+    if (this.grenadeHeld) {
+      this.grenadeCook += dt;
+      const { pos, vel } = this.throwParams();
+      const pts = Grenade.predict(w, pos, vel);
+      this.arc.geometry.setFromPoints(pts);
+      this.arc.computeLineDistances();
+      this.arc.visible = true;
+      if (inp.released('grenade') || this.grenadeCook > 3) {
+        this.grenadeHeld = false; this.arc.visible = false;
+        s.grenades--;
+        s.beginBusy('throw', 0.5);
+        const mesh = this.grenadeMesh ? this.grenadeMesh.clone() : new THREE.Mesh(new THREE.SphereGeometry(0.06), new THREE.MeshStandardMaterial({ color: 0x334422 }));
+        const g = new Grenade(w, mesh, pos, vel, s, 'frag', Math.max(0.2, 3 - this.grenadeCook));
+        w.updaters.push((d) => g.update(d));
+        w.bus.emit('grenadeThrown', s);
+      }
+    }
+  }
+
+  private throwParams() {
+    const s = this.soldier;
+    const pos = s.eyePos(new THREE.Vector3()).add(new THREE.Vector3(Math.cos(this.yaw) * 0.25, -0.1, -Math.sin(this.yaw) * 0.25));
+    const dir = this.forward();
+    dir.y += 0.15;
+    const vel = dir.normalize().multiplyScalar(19).add(s.vel.clone().multiplyScalar(0.5));
+    return { pos, vel };
+  }
+
+  // ----------------------------------------------------------------- interaction & vehicles
+  private updateInteraction(dt: number) {
+    const s = this.soldier, w = this.w, inp = w.input;
+    const eye = s.eyePos(new THREE.Vector3());
+    const fwd = this.forward();
+    this.focus = w.nearestInteractable(eye, fwd);
+    this.focusVehicle = null;
+    // nearest enterable vehicle; it wins over loot unless the loot is clearly closer
+    let bd = 4.5;
+    for (const v of w.vehicles) {
+      if (v.destroyed) continue;
+      const d = v.model.position.distanceTo(s.pos) - Math.max(v.size.x, v.size.z) * 0.35;
+      if (d < bd && v.occupants.some((o) => !o)) { bd = d; this.focusVehicle = v; }
+    }
+    if (this.focusVehicle && this.focus) {
+      const fd = this.focus.pos.distanceTo(s.pos);
+      if (fd < bd - 0.5 || this.focus.hold) this.focusVehicle = null; else this.focus = null;
+    }
+    if (this.focus?.hold) {
+      if (inp.held('interact')) { this.holdT += dt; if (this.holdT >= this.focus.hold) { this.focus.use(s); this.holdT = 0; } }
+      else this.holdT = 0;
+    } else if (inp.pressed('interact')) {
+      if (this.focus) this.focus.use(s);
+      else if (this.focusVehicle) {
+        const v = this.focusVehicle;
+        const seat = v.driver ? -1 : 0;
+        if (v.enter(s, seat)) { this.vehCamYaw = this.yaw; this.vehCamPitch = -0.2; }
+      }
+    }
+  }
+  get holdProgress() { return this.focus?.hold ? this.holdT / this.focus.hold : 0; }
+
+  private vehicleInput(dt: number, v: Vehicle) {
+    const s = this.soldier, inp = this.w.input;
+    if (inp.pressed('interact')) { v.exit(s); this.yaw = this.vehCamYaw; this.pitch = 0; return; }
+    if (inp.pressed('weaponNext') && v.def.seats > 1) {
+      // seat switch
+      const next = v.occupants.findIndex((o, i) => !o && i !== s.seat);
+      if (next >= 0) { v.occupants[s.seat] = null; v.occupants[next] = s; s.seat = next; }
+    }
+    s.move(dt, { move: new THREE.Vector3(), sprint: false, crouch: false, jump: false, yaw: s.yaw, pitch: 0 });
+    if (s.seat !== 0) {
+      // passengers in open vehicles can shoot
+      s.updateWeapon(dt);
+      if (v.exposedSeats) this.handleFire(dt);
+      return;
+    }
+    const air = v.isAir;
+    const plane = v.kind === 'plane' || v.kind === 'jet';
+    const throttle = inp.device === 'gamepad' ? inp.throttle - inp.brake : inp.moveY;
+    const c: VehicleControls = {
+      throttle: plane ? (inp.device === 'gamepad' ? inp.throttle - inp.brake : (inp.key('KeyW') ? 1 : 0) - (inp.key('KeyS') ? 1 : 0)) : air ? inp.moveY : throttle,
+      steer: plane ? (inp.key('KeyA') ? -1 : 0) + (inp.key('KeyD') ? 1 : 0) : inp.moveX,
+      up: (inp.held('ascend') ? 1 : 0) - (inp.held('descend') ? 1 : 0) + (air && inp.device === 'gamepad' ? inp.throttle - inp.brake : 0),
+      pitch: plane ? (inp.device === 'gamepad' ? -inp.moveY : (inp.key('ArrowDown') ? 1 : 0) - (inp.key('ArrowUp') ? 1 : 0) - inp.lookY * 0.02 * (settings.data.invertY ? -1 : 1)) : 0,
+      roll: plane ? (inp.device === 'gamepad' ? inp.moveX : (inp.key('ArrowRight') ? 1 : 0) - (inp.key('ArrowLeft') ? 1 : 0) + inp.lookX * 0.02) : 0,
+      aimYaw: this.vehCamYaw + Math.PI, aimPitch: -this.vehCamPitch,
+      fire: inp.held('fire'), handbrake: inp.held('jump') && !air, boost: inp.held('sprint'),
+    };
+    if (air && !plane && inp.device === 'gamepad') c.throttle = -inp.moveY * -1;
+    this.w.vehicleControls.set(v, c);
+    if (inp.pressed('crouch') && !air && v.kind !== 'sub') this.w.audio.play('horn', { pos: v.model.position, volume: 0.7 });
+  }
+
+  // ----------------------------------------------------------------- camera
+  private updateCamera(dt: number) {
+    const s = this.soldier, w = this.w, cam = w.engine.camera;
+    this.shakeAmt = Math.max(0, this.shakeAmt - dt * 2.5);
+    const sh = this.shakeAmt * this.shakeAmt;
+    const shake = new THREE.Vector3((Math.random() - 0.5) * sh * 0.12, (Math.random() - 0.5) * sh * 0.12, 0);
+    const v = s.inVehicle;
+    if (v) {
+      const center = v.model.position.clone().add(new THREE.Vector3(0, v.size.y * 0.8, 0));
+      const dist = v.def.camDist ?? 7;
+      const dir = new THREE.Vector3(0, 0, 1).applyEuler(new THREE.Euler(this.vehCamPitch, this.vehCamYaw, 0, 'YXZ'));
+      const desired = center.clone().addScaledVector(dir, dist);
+      const hit = w.physics.raycast(center, dir, dist, v.collider);
+      cam.position.copy(hit ? center.clone().addScaledVector(dir, Math.max(1, hit.dist - 0.4)) : desired);
+      const gh = w.terrain.getHeight(cam.position.x, cam.position.z) + 0.5;
+      if (cam.position.y < gh) cam.position.y = gh;
+      cam.lookAt(center);
+      cam.position.add(shake);
+      s.model.setVisible(v.exposedSeats);
+      this.vm.visible = false;
+      cam.fov = THREE.MathUtils.lerp(cam.fov, settings.data.fov + Math.min(v.speed, 60) * 0.25, dt * 3);
+      cam.updateProjectionMatrix();
+      return;
+    }
+    if (this.inPlane) return; // mode drives the camera
+    const eye = s.eyePos(new THREE.Vector3());
+    const fov = this.adsFovTarget;
+    cam.fov = THREE.MathUtils.lerp(cam.fov, s.sprinting ? fov + 8 : fov, Math.min(1, dt * 12));
+    cam.updateProjectionMatrix();
+    const rollLean = -s.leaning * 0.12;
+    const slideTilt = s.slideT > 0 ? 0.06 : 0;
+    const rot = new THREE.Euler(this.pitch + this.recoilP + shake.y, this.yaw + this.recoilY + shake.x, rollLean + slideTilt, 'YXZ');
+    const tps = this.thirdPerson || s.freefall || s.swimming;
+    if (tps) {
+      const fwd = new THREE.Vector3(0, 0, -1).applyEuler(rot);
+      const right = new THREE.Vector3(1, 0, 0).applyEuler(rot);
+      const back = THREE.MathUtils.lerp(s.freefall ? 6 : 3.2, 1.6, s.ads);
+      const pivot = eye.clone().addScaledVector(right, 0.55).add(new THREE.Vector3(0, 0.15, 0));
+      const dir = fwd.clone().negate();
+      const hit = w.physics.raycast(pivot, dir, back, s.collider);
+      cam.position.copy(pivot).addScaledVector(dir, hit ? Math.max(0.3, hit.dist - 0.25) : back);
+      cam.quaternion.setFromEuler(rot);
+      s.model.setVisible(true);
+      this.vm.visible = false;
+    } else {
+      cam.position.copy(eye);
+      cam.quaternion.setFromEuler(rot);
+      s.model.setVisible(false);
+      this.vm.visible = !s.downed && !s.freefall;
+    }
+    // flashlight follows the view
+    this.flashlight.position.copy(cam.position);
+    this.flashlight.target.position.copy(cam.position).add(this.forward().multiplyScalar(10));
+  }
+
+  private updateDeathCam(dt: number) {
+    const s = this.soldier, w = this.w, cam = w.engine.camera;
+    this.vm.visible = false;
+    this.arc.visible = false;
+    s.model.setVisible(true);
+    w.engine.setPost('none');
+    const target = this.spectateTarget && this.spectateTarget.alive ? this.spectateTarget : null;
+    if (target) {
+      // killcam / spectate: over the killer's shoulder looking at the victim
+      const eye = target.eyePos(new THREE.Vector3());
+      const look = s.pos.clone().add(new THREE.Vector3(0, 1, 0));
+      const dir = look.clone().sub(eye).normalize();
+      const pos = eye.clone().addScaledVector(dir, -2.2).add(new THREE.Vector3(0, 0.6, 0));
+      cam.position.lerp(pos, Math.min(1, dt * 4));
+      cam.lookAt(target === s.killedBy ? look : eye.clone().addScaledVector(new THREE.Vector3(Math.sin(target.yaw), 0, Math.cos(target.yaw)), 10));
+    } else {
+      const p = s.pos.clone().add(new THREE.Vector3(0, 4, 0));
+      cam.position.lerp(p.add(new THREE.Vector3(Math.sin(w.time * 0.3) * 6, 0, Math.cos(w.time * 0.3) * 6)), Math.min(1, dt * 2));
+      cam.lookAt(s.pos);
+    }
+  }
+
+  // ----------------------------------------------------------------- view-model
+  private async ensureViewModel(wp: Weapon) {
+    const key = wp.def.id + '|' + wp.attachments.join(',') + (wp.packed ? '*' : '');
+    if (key === this.vmKey) return;
+    this.vmKey = key;
+    const obj = await this.w.weaponModel(wp);
+    if (this.vmKey !== key) return;
+    if (this.vmGun) this.vm.remove(this.vmGun);
+    obj.traverse((o) => { o.castShadow = false; });
+    if (wp.packed) obj.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { const mat = (m.material as THREE.MeshStandardMaterial).clone(); mat.emissive = new THREE.Color(0x8a2be2); mat.emissiveIntensity = 0.6; m.material = mat; } });
+    // view-models face -Z (camera forward)
+    const holder = new THREE.Group();
+    obj.rotation.y = Math.PI;
+    holder.add(obj);
+    holder.userData.muzzle = (obj.userData.muzzle as THREE.Vector3)?.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI) ?? new THREE.Vector3(0, 0, -0.5);
+    holder.userData.sightY = (obj.userData.box as THREE.Box3)?.max.y ?? 0.08;
+    this.vmGun = holder;
+    this.vm.add(holder);
+  }
+
+  muzzleWorld(): THREE.Vector3 {
+    const cam = this.w.engine.camera;
+    if (this.thirdPerson || !this.vmGun) {
+      const h = this.soldier.model.handR;
+      if (h) return h.getWorldPosition(new THREE.Vector3()).add(this.forward().multiplyScalar(this.soldier.weapon.def.length * 0.8));
+      return this.soldier.eyePos(new THREE.Vector3());
+    }
+    // map overlay-space muzzle into world space using the main camera
+    const local = (this.vmGun.userData.muzzle as THREE.Vector3).clone().applyMatrix4(this.vmGun.matrix).applyMatrix4(this.vm.matrix);
+    return local.applyQuaternion(cam.quaternion).add(cam.position);
+  }
+
+  private updateViewModel(dt: number) {
+    const s = this.soldier, inp = this.w.input;
+    const oc = this.w.engine.overlayCam;
+    oc.fov = THREE.MathUtils.lerp(58, 42, s.ads);
+    oc.updateProjectionMatrix();
+    const wp = s.weapon;
+    this.ensureViewModel(wp);
+    if (!this.vmGun) return;
+    const sp = Math.hypot(s.vel.x, s.vel.z);
+    this.bobT += dt * (s.sprinting ? 13 : 8.5) * Math.min(1, sp / 3);
+    const bobA = (s.grounded ? Math.min(1, sp / 4) : 0) * (1 - s.ads * 0.9);
+    const bobX = Math.sin(this.bobT) * 0.012 * bobA, bobY = Math.abs(Math.cos(this.bobT)) * 0.012 * bobA;
+    this.swayX = THREE.MathUtils.lerp(this.swayX, -inp.lookX * 0.00035, dt * 10);
+    this.swayY = THREE.MathUtils.lerp(this.swayY, inp.lookY * 0.00035, dt * 10);
+    this.vmKick = Math.max(0, this.vmKick - dt * 7);
+    const len = wp.def.length;
+    const hip = new THREE.Vector3(0.16 + len * 0.05, -0.15 - len * 0.03, -0.28 - len * 0.32);
+    const sightY = this.vmGun.userData.sightY as number;
+    const adsP = new THREE.Vector3(0, -0.035 - sightY * 0.55, -0.2 - len * 0.3);
+    const p = hip.lerp(adsP, s.ads);
+    p.x += bobX + this.swayX; p.y += bobY + this.swayY;
+    p.z += this.vmKick * 0.06;
+    const r = new THREE.Euler(this.vmKick * 0.12 + this.swayY * 2, this.swayX * 2, 0);
+    if (s.sprinting) { p.x += 0.05; p.y -= 0.06; r.y += 0.6; r.x -= 0.25; }
+    if (wp.reloading > 0) { const k = Math.sin(Math.min(1, 1 - wp.reloading / wp.stats.reload) * Math.PI); p.y -= k * 0.12; r.x -= k * 0.6; r.z += k * 0.4; }
+    if (this.inspectT > 0) { this.inspectT -= dt; const k = Math.sin((1 - this.inspectT / 2.2) * Math.PI); r.y += k * 1.2; r.z += k * 0.5; p.x -= k * 0.08; }
+    if (s.busyT > 0) { p.y -= 0.25; }
+    if (wp.def.cls === 'melee') { r.x += -0.4 + this.vmKick * 1.2; p.z -= this.vmKick * 0.15; }
+    this.vmGun.position.lerp(p, Math.min(1, dt * 18));
+    this.vmGun.rotation.set(r.x, r.y, r.z);
+    // consumable item while healing / plating
+    if (s.busyT > 0 && (s.busyKind === 'heal' || s.busyKind === 'plate' || s.busyKind === 'syringe')) {
+      const want = s.busyKind === 'plate' ? 'item_vest' : s.busyKind === 'syringe' ? 'item_syringe' : 'item_medkit';
+      if (!this.vmItem || this.vmItem.name !== want) {
+        if (this.vmItem) this.vm.remove(this.vmItem);
+        this.vmItem = null;
+        this.w.assets.instance(want).then((m) => {
+          m.name = want; const holder = new THREE.Group(); holder.name = want; holder.add(m);
+          m.scale.multiplyScalar(want === 'item_vest' ? 0.5 : 0.8);
+          this.vmItem = holder; this.vm.add(holder);
+        });
+      }
+      if (this.vmItem) { const k = 1 - s.busyT / (s.busyKind === 'heal' ? 3.5 : 1.1); this.vmItem.visible = true; this.vmItem.position.set(-0.05, -0.22 + Math.sin(k * Math.PI) * 0.08, -0.42); this.vmItem.rotation.set(0.4, 0.6 + k, 0); }
+    } else if (this.vmItem) this.vmItem.visible = false;
+  }
+
+  // ----------------------------------------------------------------- aim assist
+  aimAssistTarget(): Actor | null {
+    const s = this.soldier, w = this.w;
+    const eye = s.eyePos(new THREE.Vector3());
+    const f = this.forward();
+    let best: Actor | null = null, bestA = THREE.MathUtils.degToRad(s.ads > 0.5 ? 5 : 3.5);
+    for (const a of w.actors) {
+      if (!a.alive || a === s || (a.team === s.team && a.kind === 'soldier')) continue;
+      const to = a.eyePos(new THREE.Vector3()).add(new THREE.Vector3(0, -0.3, 0)).sub(eye);
+      const d = to.length();
+      if (d > 70) continue;
+      const ang = to.normalize().angleTo(f);
+      if (ang < bestA) { bestA = ang; best = a; }
+    }
+    return best;
+  }
+}

@@ -1,0 +1,202 @@
+import * as THREE from 'three';
+import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { MODELS, KITS, CHARACTER_ANIMS, type ModelDef, type KitId } from './manifest';
+
+/**
+ * AssetManager
+ *  - Loads Draco / Meshopt compressed GLB and KTX2 (Basis) textures
+ *  - Routes requests through the Lumos Cloud CDN when configured, falling back to the
+ *    locally bundled /assets folder (works offline and in Codespaces)
+ *  - Normalises third-party models (scale / yaw / pivot) using the manifest
+ *  - Hands out cheap clones (shared geometry & materials, SkeletonUtils for skinned meshes)
+ */
+export class AssetManager {
+  private loader = new GLTFLoader();
+  private cache = new Map<string, Promise<GLTF>>();
+  private normalized = new Map<string, THREE.Object3D>();
+  private kitCache = new Map<string, THREE.Object3D>();
+  readonly cdnBases: string[] = [];
+  lowSpec = false;
+  bytesLoaded = 0;
+
+  constructor(renderer?: THREE.WebGLRenderer) {
+    const draco = new DRACOLoader();
+    draco.setDecoderPath('./draco/');
+    draco.preload();
+    this.loader.setDRACOLoader(draco);
+    this.loader.setMeshoptDecoder(MeshoptDecoder);
+    if (renderer) {
+      const ktx2 = new KTX2Loader().setTranscoderPath('./basis/').detectSupport(renderer);
+      this.loader.setKTX2Loader(ktx2);
+    }
+    const cdn = (import.meta.env.VITE_LUMOS_CDN as string | undefined) || (window as any).LumosCloudSDK?.cdnBase;
+    if (cdn) this.cdnBases.push(cdn.replace(/\/$/, '') + '/');
+  }
+
+  private async fetchGLTF(file: string): Promise<GLTF> {
+    const bases = [...this.cdnBases, './assets/'];
+    let lastErr: unknown;
+    for (const base of bases) {
+      try {
+        return await this.loader.loadAsync(`${base}${file}.glb`, (e) => { if (e.total) this.bytesLoaded += 0; });
+      } catch (e) { lastErr = e; }
+    }
+    throw lastErr;
+  }
+
+  load(file: string): Promise<GLTF> {
+    let p = this.cache.get(file);
+    if (!p) {
+      p = this.fetchGLTF(file).then((g) => { this.prepare(g.scene); return g; });
+      this.cache.set(file, p);
+    }
+    return p;
+  }
+
+  /** Shadow flags + optional low-spec material conversion (Lambert is ~3x cheaper than PBR). */
+  private prepare(root: THREE.Object3D) {
+    root.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      m.castShadow = true;
+      m.receiveShadow = true;
+      if ((m as THREE.SkinnedMesh).isSkinnedMesh) m.frustumCulled = false;
+      const mats = Array.isArray(m.material) ? m.material : [m.material];
+      for (const mat of mats) {
+        const sm = mat as THREE.MeshStandardMaterial;
+        if (sm.isMeshStandardMaterial) {
+          // many Sketchfab exports ship fully metallic materials that render black without an env map
+          if (sm.metalness > 0.6 && !sm.metalnessMap) sm.metalness = 0.4;
+          sm.envMapIntensity = 0.6;
+        }
+      }
+      if (this.lowSpec) {
+        const conv = mats.map((mat) => {
+          const sm = mat as THREE.MeshStandardMaterial;
+          if (!sm.isMeshStandardMaterial) return mat;
+          const l = new THREE.MeshLambertMaterial({ map: sm.map, color: sm.color, transparent: sm.transparent, opacity: sm.opacity, alphaTest: sm.alphaTest, side: sm.side, vertexColors: sm.vertexColors, emissive: sm.emissive, emissiveMap: sm.emissiveMap });
+          l.name = sm.name;
+          return l;
+        });
+        m.material = Array.isArray(m.material) ? conv : conv[0];
+      }
+    });
+  }
+
+  /** Builds (once) the normalised template for a manifest id. */
+  async template(id: string): Promise<THREE.Object3D> {
+    const hit = this.normalized.get(id);
+    if (hit) return hit;
+    const def: ModelDef | undefined = MODELS[id];
+    if (!def) throw new Error(`Unknown model id ${id}`);
+    const gltf = await this.load(def.file);
+    const inner = gltf.scene;
+    for (const h of def.hide ?? []) inner.getObjectByName(h)?.removeFromParent();
+    const pivot = new THREE.Group();
+    pivot.name = id;
+    const yawGroup = new THREE.Group();
+    yawGroup.rotation.y = THREE.MathUtils.degToRad(def.yaw ?? 0);
+    yawGroup.add(inner);
+    pivot.add(yawGroup);
+    pivot.updateMatrixWorld(true);
+    const box = this.visibleBox(def.lengthNode ? (inner.getObjectByName(def.lengthNode) ?? pivot) : pivot);
+    const size = box.getSize(new THREE.Vector3());
+    let s = 1;
+    if (def.length) s = def.length / Math.max(size.z, 1e-6);
+    else if (def.height) s = def.height / Math.max(size.y, 1e-6);
+    else if (def.width) s = def.width / Math.max(size.x, 1e-6);
+    yawGroup.scale.setScalar(s);
+    pivot.updateMatrixWorld(true);
+    const fb = this.visibleBox(pivot);
+    if (!def.keepOrigin) {
+      const c = fb.getCenter(new THREE.Vector3());
+      yawGroup.position.set(-c.x, -fb.min.y, -c.z);
+    } else {
+      yawGroup.position.y = -fb.min.y;
+    }
+    pivot.updateMatrixWorld(true);
+    pivot.userData.animations = gltf.animations;
+    pivot.userData.size = this.visibleBox(pivot).getSize(new THREE.Vector3());
+    this.normalized.set(id, pivot);
+    return pivot;
+  }
+
+  visibleBox(obj: THREE.Object3D) {
+    const box = new THREE.Box3();
+    obj.updateMatrixWorld(true);
+    obj.traverseVisible((o) => { if ((o as THREE.Mesh).isMesh) box.expandByObject(o, true); });
+    if (box.isEmpty()) box.setFromCenterAndSize(new THREE.Vector3(), new THREE.Vector3(1, 1, 1));
+    return box;
+  }
+
+  /** Returns a new instance of a model (skinned meshes get their own skeleton). */
+  async instance(id: string): Promise<THREE.Object3D> {
+    const t = await this.template(id);
+    let skinned = false;
+    t.traverse((o) => { if ((o as THREE.SkinnedMesh).isSkinnedMesh) skinned = true; });
+    const c = skinned ? SkeletonUtils.clone(t) : t.clone(true);
+    c.userData = { ...t.userData };
+    return c;
+  }
+
+  async kit(kit: KitId): Promise<THREE.Object3D> {
+    const g = await this.load(KITS[kit]);
+    return g.scene;
+  }
+
+  /** Clone of a named kit piece with its pivot on the ground. */
+  async kitPiece(kit: KitId, name: string): Promise<THREE.Object3D> {
+    const key = `${kit}:${name}`;
+    let t = this.kitCache.get(key);
+    if (!t) {
+      const scene = await this.kit(kit);
+      const src = scene.getObjectByName(name);
+      if (!src) throw new Error(`kit piece ${key} missing`);
+      const piece = src.clone(true);
+      piece.position.set(0, 0, 0);
+      const wrap = new THREE.Group();
+      wrap.add(piece);
+      wrap.updateMatrixWorld(true);
+      const b = this.visibleBox(wrap);
+      const bc = b.getCenter(new THREE.Vector3());
+      piece.position.set(-bc.x, -b.min.y, -bc.z);
+      wrap.userData.size = b.getSize(new THREE.Vector3());
+      wrap.userData.center = b.getCenter(new THREE.Vector3());
+      wrap.name = name;
+      t = wrap;
+      this.kitCache.set(key, t);
+    }
+    const c = t.clone(true);
+    c.userData = { ...t.userData };
+    return c;
+  }
+
+  kitNames(kit: KitId): Promise<string[]> {
+    return this.kit(kit).then((s) => s.children.map((c) => c.name));
+  }
+
+  async characterClips(): Promise<THREE.AnimationClip[]> {
+    const g = await this.load(CHARACTER_ANIMS);
+    return g.animations;
+  }
+
+  /** Preloads a list of model ids / files with progress feedback. */
+  async preload(ids: string[], onProgress?: (done: number, total: number) => void) {
+    let done = 0;
+    const total = ids.length;
+    await Promise.all(ids.map(async (id) => {
+      try {
+        if (id.startsWith('kit:')) await this.kit(id.slice(4) as KitId);
+        else if (id === 'anims') await this.characterClips();
+        else await this.template(id);
+      } catch (e) {
+        console.warn('asset failed', id, e);
+      }
+      onProgress?.(++done, total);
+    }));
+  }
+}
