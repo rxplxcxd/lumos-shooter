@@ -29,7 +29,7 @@ export class TouchControls {
     const btns = this.root.querySelector('.btns') as HTMLElement;
     const layout: [Action, string, number, number, string?][] = [
       ['fire', 'FEUER', 196, 176, 'fire'], ['ads', 'ZIEL', 112, 206], ['jump', 'SPRUNG', 212, 92], ['crouch', 'DUCK', 132, 122], ['reload', 'R', 46, 176],
-      ['interact', 'NUTZEN', 52, 96], ['grenade', 'GRAN', 212, 12], ['weaponNext', 'WAFFE', 132, 40], ['heal', '✚', -34, 206], ['plate', '🛡', -34, 130], ['sprint', 'SPRINT', -34, 54],
+      ['interact', 'NUTZEN', 52, 96], ['grenade', 'GRAN', 212, 12], ['weaponNext', 'WAFFE', 132, 40], ['heal', '✚', -34, 206], ['plate', '🛡', -34, 130], ['sprint', 'SPRINT', -34, 54], ['ping', '◆', 52, 22],
     ];
     const pause = document.createElement('div');
     pause.className = 'tb pause-btn'; pause.textContent = '❚❚';

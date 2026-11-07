@@ -8,18 +8,25 @@ Browser-3D-Taktik-Shooter und Battle Royale mit Three.js (WebGL2) und Rapier (WA
 
 ```bash
 npm install
-npm run dev          # öffnet http://localhost:5173
+npm run dev          # Spiel auf http://localhost:5173 + Echtzeit-Relay (Port 8787, über /ws durchgereicht)
 ```
 
-**GitHub Codespaces:** Repo im Codespace öffnen. `npm install` läuft automatisch (`.devcontainer`). Danach `npm run dev` starten. Port 5173 wird weitergeleitet und öffnet sich als Vorschau, für die beste Performance im eigenen Browser-Tab öffnen.
+**GitHub Codespaces:** Repo im Codespace öffnen. `npm install` läuft automatisch (`.devcontainer`). Danach `npm run dev` starten. Port 5173 wird weitergeleitet und öffnet sich als Vorschau, für die beste Performance im eigenen Browser-Tab öffnen. Für Online-Tests mit einer zweiten Person den Port 5173 im Tab „Ports“ auf **Public** stellen und die URL teilen.
+
+### Zu zweit (oder mehr) online spielen
+
+1. Beide öffnen dieselbe Spiel-URL (lokal im LAN `http://<deine-IP>:5173`, im Codespace die öffentliche Port-URL).
+2. Im Spielen-Tab im Kasten **Online · Party** einen Party-Code eintragen (z. B. `ALPHA`) und beitreten, die zweite Person tritt mit demselben Code bei.
+3. Der erste Spieler im Raum ist Host. Er wählt Modus und Karte und startet: alle laden mit demselben Seed dieselbe Welt.
+4. Host-Relay: der Host simuliert Bots, Zombies, Zone und Spielstand und schickt 10-mal pro Sekunde Snapshots, Spieler senden ihren Zustand mit 20 Hz. Treffer, Loot, Türen, Fahrzeuge und Pings werden als Events synchronisiert. Verlässt der Host das Spiel, übernimmt automatisch ein anderer Spieler.
 
 Weitere Befehle:
 
 | Befehl | Zweck |
 |---|---|
-| `npm run dev` | Dev-Server (Vite, Hot Reload) |
-| `npm run server` | Echtzeit-Relay-Server (WebSocket, Port 8787) |
-| `npm run dev:all` | Dev-Server und Echtzeit-Server zusammen |
+| `npm run dev` | Dev-Server (Vite, Hot Reload) und Echtzeit-Relay zusammen |
+| `npm run dev:web` | nur der Vite-Dev-Server |
+| `npm run server` | nur der Echtzeit-Relay-Server (WebSocket, Port 8787) |
 | `npm run build` / `npm run preview` | Produktions-Build nach `dist/` und lokale Vorschau |
 | `npm run typecheck` | TypeScript-Prüfung |
 | `/viewer.html?files=vehicles/tank,vehicles/jeep` | Asset-Viewer (Ausrichtung und Skalierung prüfen) |
@@ -29,11 +36,14 @@ Das Spiel läuft **komplett offline**. Supabase, Lumos Cloud und der Echtzeit-Se
 ## Spielmodi
 
 - **Battle Royale**: bis zu 100 Spieler (Spieler + KI-Bots). Solo, Duos, Trios, Quads sowie die Modifikatoren Nur Sniper, CQB, High-Tier-Loot und **Extraktion**. Dazu gehören:
-  - Absetzflugzeug, Freifall und Fallschirm
+  - Absetzflugzeug, Freifall und **Fallschirm wie in Warzone**: mit Space beliebig oft öffnen und wieder kappen, automatische Öffnung in Bodennähe
+  - **Gezielter Gleitflug**: im Freifall mit WASD/Stick in jede Richtung steuern, nach unten schauen = Sturzflug, am Schirm flacher Gleitwinkel (ca. 3:1) für weit entfernte Ziele
   - Sturmzone in 6 Phasen
   - Loot mit Seltenheits-Lichtsäulen
   - Kaufstationen (Platten, Weste, UAV, Versorgungsabwurf, Teammitglied absetzen, Loadout-Drop)
   - Versorgungsabwürfe, Down-State und Wiederbeleben, Death Crates, Platzierung
+  - **Lumos City** als echtes Straßenraster: Fahrbahnen mit Zebrastreifen, Gehwege mit Bordsteinen, Ampeln, Bushaltestellen, Bänke, Hydranten, Parkuhren, Müllcontainer und Bäume. Straßenlaternen und Fenster gehen in der Dämmerung an, bei Regen glänzen die Straßen, aus Gullys steigt Dampf
+  - Mülltonnen, Container und Paletten sind Physik-Objekte, die Autos, Schüsse und Explosionen umwerfen
 - **Zombie Royale**: Battle Royale mit Zombie-Horden an den POIs. Gefallene Spieler erheben sich wieder.
 - **Multiplayer** auf der 3-Lane-Map „Crossroads“: Team Deathmatch, Free-for-All, Capture the Flag und Search & Destroy. Mit taktischen Respawns, Scorestreaks (UAV, Care Package, Cluster Strike) und einer optionalen Nachtkarte mit Nachtsicht.
 - **Zombies „Outpost 9“** (rundenbasiert):
@@ -43,6 +53,15 @@ Das Spiel läuft **komplett offline**. Supabase, Lumos Cloud und der Echtzeit-Se
   - Power-ups: Max Ammo, Insta-Kill, Nuke, Double Points
   - Kopfschuss-Zerstückelung, Kriecher durch Beintreffer
   - Story-Easter-Egg mit Funk-Logs, Notsignal, Endwelle und Heli-Evakuierung
+
+## Release-Candidate-Features
+
+- **Ping-System**: Z / mittlere Maustaste / Steuerkreuz ↑. Kontextabhängig: Feind unter dem Fadenkreuz, Fahrzeug, Loot oder Ort, doppelt tippen = Gefahr. Marker in der Welt, am Bildschirmrand und auf der Minimap, wird im Team übers Netz geteilt, KI-Teammitglieder laufen zum Ping.
+- **Medaillen**: Doppel-/Triple-/Multi-Kill, Serien, First Blood, Kopfschuss, Weitschuss, Rache, Kollateral, Überlebenskünstler und mehr, jeweils mit Bonus-XP.
+- **Schadenszahlen** über getroffenen Gegnern (stapeln sich pro Ziel, gelb = Kopf, blau = Rüstung), abschaltbar in den Einstellungen.
+- **Match-Statistik** am Ende: Kills, Schaden, Kopftreffer, Trefferquote, weitester Kill, Strecke zu Fuß und im Fahrzeug, Überlebenszeit, Medaillen.
+- **Fotomodus** (Pausenmenü): freie Kamera, FOV und Neigung, Filter (Kino, Noir, Lebendig, Vintage, Nachtsicht, Wärmebild), Kinobalken und PNG-Screenshot.
+- **Visier-Kalibrierung**: Für jede Waffe wird die Visierlinie aus der Modellgeometrie berechnet (Kimme/Korn, Lochkimmen werden erkannt). Bei Zielfernrohren, 3,5x- und Wärmebild-Optiken verschwindet das Waffenmodell beim Zielen vollständig, das Okular mit Absehen und Parallaxe-Schatten übernimmt.
 
 ## Fahrzeuge (30, alle fahr-, flieg- oder schwimmbar)
 
@@ -62,7 +81,7 @@ Die Landfahrzeuge nutzen Rapier-Raycast-Räder, Wasserfahrzeuge haben Auftrieb a
 |---|---|---|
 | Bewegen / Zielen | WASD / Maus | linker / rechter Stick |
 | Schießen / ADS | LMB / RMB | RT / LT |
-| Springen, Klettern | Space | A / ✕ |
+| Springen, Klettern, Fallschirm öffnen/kappen | Space | A / ✕ |
 | Ducken (beim Sprinten: Rutschen) | C / Ctrl | B / ◯ |
 | Sprinten | Shift | L3 (Toggle) |
 | Nachladen / Nutzen / Einsteigen | R / F | X / ▢ |
@@ -72,9 +91,12 @@ Die Landfahrzeuge nutzen Rapier-Raycast-Räder, Wasserfahrzeuge haben Auftrieb a
 | Heilen / Panzerplatte | H / X | ← / ↓ |
 | Lehnen | Q / E | – |
 | Kamera 1st/3rd Person | T | R3 |
-| Nachtsicht | N | ↑ |
+| Nachtsicht | N | View / Select |
+| Ping (2× = Gefahr) | Z / mittlere Maustaste | ↑ |
 | Scorestreak | B | → |
 | Inspizieren / Emote | I / J | – |
+| Atem anhalten (mit Zielfernrohr) | Shift | L3 |
+| Fotomodus | Pausenmenü → Fotomodus (F: Filter, I: Kinobalken, Klick: Foto, Esc: zurück) | Pausenmenü (A: Foto) |
 | Fahrzeug: Heli hoch / runter | Space / Ctrl | A / B oder RT / LT |
 | Flugzeug: Schub, Neigen, Rollen | W/S, Pfeiltasten | Trigger, linker Stick |
 
@@ -96,15 +118,17 @@ src/
   gameplay/  GameWorld, Mode-Basis, Loot, Modi (BattleRoyale, Multiplayer, Zombies)
   ui/        Menü (Lobby 3D, Gunsmith, Operator, Battle Pass, Kisten, Karriere, Einstellungen), HUD, Touch
   net/       Backend (Lumos Cloud → Supabase → lokal), Profil/Progression, NetClient (WebSocket)
-server/      WebSocket-Relay (Räume, 20-Hz-State, Hits mit Clamping, Party-Invites)
+server/      WebSocket-Relay (Party-Räume per Code, Host-Migration, State/Snapshots/Events, Hits mit Clamping, Rate-Limit)
 scripts/     Asset-Pipeline: process-assets, build-kit, build-characters, inspect-assets, build-credits
 supabase/    schema.sql (profiles, matches, friends, party_invites + RLS)
 ```
 
 **Performance für Low-End:**
-- Qualitätsstufen Potato, Low, Medium und High mit automatischer Erkennung
+- Qualitätsstufen Potato, Low, Medium, High und Ultra mit automatischer Erkennung
 - Dynamische Auflösung (Render-Skalierung 60–100 %, das DOM-UI bleibt scharf)
-- Static Batching (eine Mesh pro Material), Instanced Vegetation in Chunks mit Distanz-Culling und LOD-Wechsel
+- Static Batching (eine Mesh pro Material und Block), Instanced Vegetation in Chunks mit Distanz-Culling und dreistufigem LOD
+- Gebäude-LOD pro Stadtblock, kleine Requisiten ohne Schattenwurf und mit Distanz-Culling, Charakter-LOD-Mesh am selben Skelett
+- Straßenlaternen: nur die nächsten Lampen bekommen echte Punktlichter, alle anderen leuchten über einen einzigen Glow-Draw-Call
 - Animations-LOD (entfernte Charaktere werden seltener aktualisiert), Physik-LOD für entfernte Bots
 - Lambert-Materialien auf Low-Spec, Draco-Geometrie, WebP-Texturen (max. 1024 px)
 - Shader-Warm-up vor dem Match
@@ -115,7 +139,7 @@ Alles ist optional. Ohne Schlüssel speichert das Spiel lokal.
 
 1. **Lumos Cloud** (Primär-Backend): `VITE_LUMOS_API` und `VITE_LUMOS_SESSION_TOKEN`, oder zur Laufzeit `window.LumosCloudSDK = { apiBase, sessionToken, cdnBase }`. Endpunkte: `GET /api/v1/lumos/user/profile`, `POST /api/v1/lumos/user/sync`, `GET /api/v1/lumos/user/friends`, `POST /api/v1/lumos/party/invite`.
 2. **Supabase** (Fallback): `VITE_SUPABASE_URL` und `VITE_SUPABASE_ANON_KEY`. Dazu `supabase/schema.sql` ausführen und unter Auth die anonymen Logins aktivieren.
-3. **Echtzeit**: `npm run server` und `VITE_REALTIME_URL=ws://localhost:8787` (oder `?server=ws://host:8787`).
+3. **Echtzeit**: läuft mit `npm run dev` automatisch mit (Vite reicht `/ws` an Port 8787 durch). Für einen separaten Server `VITE_REALTIME_URL=wss://host/ws` setzen.
 
 ## Assets neu erzeugen
 
@@ -125,5 +149,7 @@ Die Rohdaten (Sketchfab-GLB, itch.io-ZIPs) liegen nicht im Repo, nur die optimie
 node scripts/process-assets.mjs <rawDir> public/assets/<kategorie> --tex 1024
 node scripts/build-kit.mjs public/assets/kits/nature.glb --tex 512 <gltf...>
 node scripts/build-characters.mjs UAL1.glb UAL2.glb public/assets/characters mannequin=...
+node scripts/build-pack-kit.mjs cityprops.glb public/assets/kits/cityprops.glb --tex 512 --group "BusStop=BusStop_*"
+node scripts/build-lod.mjs public/assets/kits/nature.glb public/assets/kits/nature_lod2.glb 0.03 0.4
 npm run assets:credits
 ```

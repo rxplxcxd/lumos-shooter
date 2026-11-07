@@ -22,6 +22,7 @@ export class PhotoMode {
   private lookIdx = 0;
   private letterbox = false;
   private e = new THREE.Euler(0, 0, 0, 'YXZ');
+  private guard = 0;
 
   constructor(private w: GameWorld, private input: Input, private ui: HTMLElement) {}
 
@@ -46,6 +47,7 @@ export class PhotoMode {
     this.el.querySelector('[data-k="shot"]')!.addEventListener('click', (ev) => { ev.stopPropagation(); this.capture(); });
     this.el.querySelector('[data-k="exit"]')!.addEventListener('click', (ev) => { ev.stopPropagation(); this.exit(); });
     this.applyLook();
+    this.guard = 0.4; // ignore the key press that opened the menu on slow frames
     this.input.lock();
   }
 
@@ -88,7 +90,8 @@ export class PhotoMode {
   update(dt: number) {
     if (!this.active) return;
     const inp = this.input, cam = this.w.engine.camera;
-    if (inp.pressed('pause')) { this.exit(); return; }
+    this.guard -= dt;
+    if (inp.pressed('pause') && this.guard <= 0) { this.exit(); return; }
     if (inp.pressed('interact') || inp.pressed('reload')) this.nextLook();
     if (inp.pressed('heal')) this.el?.classList.toggle('hide-panel');
     if (inp.pressed('fire') || inp.pressed('jump') && inp.device === 'gamepad') this.capture();

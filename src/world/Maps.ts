@@ -363,7 +363,14 @@ export async function buildArena(w: GameWorld, seed: number, progress: Progress,
     const id = R.pick(['env_sandbag', 'env_barrier', 'item_crate', 'env_boxes']);
     await mb.place(id, x, z, R.next() * 6, { collider: 'box', surface: id === 'item_crate' || id === 'env_boxes' ? 'wood' : 'metal', scale: id === 'env_sandbag' ? 2.6 : 1.4, destructible: id === 'env_boxes' ? 90 : undefined, y });
   }
-  for (const [x, z] of [[-20, -70], [22, 72], [-60, 10], [60, -10]]) await mb.place('kit:street:Streetlight_Double', x, z, 0, { scale: 5.5, collider: 'box', y, surface: 'metal' });
+  for (const [x, z] of [[-20, -70], [22, 72], [-60, 10], [60, -10]]) { await mb.place('kit:street:Streetlight_Double', x, z, 0, { scale: 5.5, collider: 'box', y, surface: 'metal' }); w.lights?.add(new THREE.Vector3(x, y + 5.8, z)); }
+  mb.flush();
+  // main street: lamps both sides, bins / dumpsters / benches that react to fire and explosions
+  await lampRow(mb, 0, -100, 0, 100, 7.5, 33, 'street:Streetlight_Single', 1.02, 5.5);
+  await dressPOI(mb, 0, 0, 95, [{ id: 'cityprops:TrashCanLarge', n: 8, mass: 30 }, { id: 'cityprops:TrashCommercial', n: 6, mass: 30 }, { id: 'cityprops:Dumpster', n: 5, mass: 260 },
+    { id: 'cityprops:pallet1', n: 6, mass: 20 }, { id: 'cityprops:TarpCrates', n: 4, surface: 'wood' }, { id: 'cityprops:FireHydrant', n: 4, scale: 0.8 }, { id: 'cityprops:Utility', n: 3 },
+    { id: 'cityprops:ParkBenchLong', n: 4, surface: 'wood' }, { id: 'cityprops:PostBox', n: 2 }], R, 0.12);
+  await mb.place('kit:cityprops:BusStop', 7, 22, -Math.PI / 2, { y, scale: 0.85, collider: 'mesh', surface: 'metal' });
   mb.flush();
   // static car wrecks as cover
   for (const [x, z, id, yaw] of [[8, -40, 'car_sedan', 0.4], [-10, 44, 'car_taxi', -0.3], [-50, -30, 'car_suv', 1.6], [48, 28, 'car_cop', 1.2]] as [number, number, string, number][]) {
@@ -374,6 +381,7 @@ export async function buildArena(w: GameWorld, seed: number, progress: Progress,
   await mb.scatterKit(['Pine_2', 'CommonTree_2', 'CommonTree_4'], 160, { avoid: [{ x: 0, z: 0, r: 115 }], collider: 0.35, scale: [1, 1.5], area: 200 });
   await mb.scatterKit(['Bush_Common', 'Grass_Common_Tall'], 300, { avoid: [{ x: 0, z: 0, r: 100 }], scale: [0.8, 1.4], shadow: false, area: 200 });
   if (w.ambient) await w.ambient.addFlock(new THREE.Vector3(0, 0, 0), 60, 30, 'seagulls', 1);
+  await w.lights?.build();
   // invisible boundary walls
   for (const [x, z, hx, hz] of [[0, -112, 120, 2], [0, 112, 120, 2], [-112, 0, 2, 120], [112, 0, 2, 120]]) w.physics.addBox(new THREE.Vector3(x, 20, z), new THREE.Vector3(hx, 40, hz));
   const teamA: THREE.Vector3[] = [], teamB: THREE.Vector3[] = [];

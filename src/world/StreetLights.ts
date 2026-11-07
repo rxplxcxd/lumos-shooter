@@ -19,6 +19,13 @@ export class StreetLights {
   private on = 0;
   private t = 0;
   private sortT = 0;
+  /** wet city surfaces in rain (darker, glossy, reflecting the sky / lamps) */
+  private wetMats: { m: THREE.MeshStandardMaterial; r: number; c: THREE.Color; e: number }[] = [];
+  private wet = 0;
+  /** manholes / drains that steam (more at night and in the cold rain) */
+  steam: THREE.Vector3[] = [];
+  private steamT = 0;
+  private steamCol = new THREE.Color(0xd8dde2);
 
   constructor(private w: GameWorld, lights: number) {
     for (let i = 0; i < lights; i++) {
@@ -66,6 +73,14 @@ export class StreetLights {
       for (const m of this.windows) { if (m.map && !m.emissiveMap) { m.emissiveMap = m.map; m.needsUpdate = true; } m.emissive.setRGB(1, 0.78, 0.5); }
     } catch { /* optional */ }
     for (const m of this.heads) m.emissive.setRGB(1, 0.85, 0.6);
+    try {
+      (await this.w.assets.kit('city')).traverse((o) => {
+        const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+        if (!m || Array.isArray(m) || !m.isMeshStandardMaterial || !/MI_(Asphalt|Trim_MetalConcrete|Concrete|StreetDecals)/.test(m.name)) return;
+        if (this.wetMats.some((x) => x.m === m)) return;
+        this.wetMats.push({ m, r: m.roughness, c: m.color.clone(), e: m.envMapIntensity });
+      });
+    } catch { /* optional */ }
   }
 
   private target() {
@@ -78,6 +93,28 @@ export class StreetLights {
   }
 
   update(dt: number) {
+    // rain makes the streets wet: glossy, darker asphalt that mirrors the sky and the lamps
+    const wantWet = this.w.sky.weather === 'rain' ? 1 : 0;
+    if (this.wetMats.length && Math.abs(wantWet - this.wet) > 0.001) {
+      this.wet += (wantWet - this.wet) * Math.min(1, dt * 0.15);
+      for (const x of this.wetMats) {
+        x.m.roughness = THREE.MathUtils.lerp(x.r, Math.min(x.r, 0.16), this.wet);
+        x.m.envMapIntensity = THREE.MathUtils.lerp(x.e, 1.5, this.wet);
+        x.m.color.copy(x.c).multiplyScalar(1 - 0.38 * this.wet);
+      }
+    }
+    // steam rising from manholes near the camera
+    this.steamT -= dt;
+    if (this.steam.length && this.steamT <= 0) {
+      this.steamT = 0.12;
+      const cam = this.w.engine.camera.position;
+      const k = 0.35 + this.on * 0.4 + this.wet * 0.4;
+      for (const p of this.steam) {
+        if (p.distanceToSquared(cam) > 110 * 110 || Math.random() > k) continue;
+        this.w.effects.emit(new THREE.Vector3(p.x + (Math.random() - 0.5) * 0.5, p.y + 0.05, p.z + (Math.random() - 0.5) * 0.5),
+          new THREE.Vector3((Math.random() - 0.5) * 0.3 + 0.25, 0.9 + Math.random() * 0.5, (Math.random() - 0.5) * 0.3), this.steamCol, 0.16, 0.9, 3.2, -0.15, 1.6);
+      }
+    }
     if (!this.lamps.length) return;
     this.t += dt;
     const tg = this.target();
@@ -85,7 +122,7 @@ export class StreetLights {
     if (this.glowMat) {
       this.glowMat.uniforms.on.value = this.on;
       this.glowMat.uniforms.time.value = this.t;
-      this.glowMat.uniforms.scale.value = this.w.engine.renderer.domElement.height * 1.4;
+      this.glowMat.uniforms.scale.value = this.w.engine.renderer.domElement.height * 0.55;
       this.glow!.visible = this.on > 0.02;
     }
     for (const m of this.heads) m.emissiveIntensity = this.on * 4;
@@ -111,6 +148,7 @@ export class StreetLights {
   }
 
   dispose() {
+    for (const x of this.wetMats) { x.m.roughness = x.r; x.m.envMapIntensity = x.e; x.m.color.copy(x.c); }
     for (const m of this.heads) m.emissiveIntensity = 0;
     for (const m of this.windows) m.emissiveIntensity = 0;
   }

@@ -57,6 +57,7 @@ export async function buildCity(mb: MapBuilder, cx: number, cz: number, h: numbe
         const x = x0 + (x1 - x0) * t, z = z0 + (z1 - z0) * t;
         const lane = (R.chance(0.5) ? 1 : -1) * ROAD_HW * 0.45;
         await mb.place('kit:cityprops:Manhole', x + (alongX ? 0 : lane), z + (alongX ? lane : 0), R.next() * 6, { y: h + 0.025, collider: 'none', batch: roads });
+        if (R.chance(0.3)) w.lights?.steam.push(new THREE.Vector3(x + (alongX ? 0 : lane), h + 0.05, z + (alongX ? lane : 0)));
         if (detail >= 1 && i === 1) {
           const side = R.chance(0.5) ? 1 : -1;
           await mb.place('kit:cityprops:Drain', x + (alongX ? 3 : side * (ROAD_HW - 0.8)), z + (alongX ? side * (ROAD_HW - 0.8) : 3), alongX ? 0 : Math.PI / 2, { y: h + 0.025, collider: 'none', batch: roads });

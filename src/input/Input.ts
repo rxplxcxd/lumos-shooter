@@ -25,8 +25,8 @@ const KEYMAP: Record<string, Action> = {
 const PAD = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, BACK: 8, START: 9, LS: 10, RS: 11, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15, HOME: 16 };
 const PADMAP: [number, Action][] = [
   [PAD.A, 'jump'], [PAD.B, 'crouch'], [PAD.X, 'reload'], [PAD.X, 'interact'], [PAD.Y, 'weaponNext'], [PAD.LB, 'grenade'], [PAD.RB, 'melee'],
-  [PAD.LT, 'ads'], [PAD.RT, 'fire'], [PAD.LS, 'sprint'], [PAD.RS, 'camera'], [PAD.START, 'pause'], [PAD.BACK, 'map'],
-  [PAD.UP, 'nvg'], [PAD.DOWN, 'plate'], [PAD.LEFT, 'heal'], [PAD.RIGHT, 'killstreak'],
+  [PAD.LT, 'ads'], [PAD.RT, 'fire'], [PAD.LS, 'sprint'], [PAD.RS, 'camera'], [PAD.START, 'pause'], [PAD.BACK, 'nvg'],
+  [PAD.UP, 'ping'], [PAD.DOWN, 'plate'], [PAD.LEFT, 'heal'], [PAD.RIGHT, 'killstreak'],
 ];
 
 export class Input {
@@ -203,8 +203,8 @@ export class Input {
   /** Returns the glyph label for an action on the current device. */
   glyph(a: Action): string {
     const set = settings.data.glyphs === 'auto' ? (this.device === 'gamepad' ? this.padType : this.device === 'touch' ? 'touch' : 'keyboard') : settings.data.glyphs;
-    const xbox: Partial<Record<Action, string>> = { jump: 'A', crouch: 'B', reload: 'X', interact: 'X', weaponNext: 'Y', grenade: 'LB', melee: 'RB', ads: 'LT', fire: 'RT', sprint: 'L3', camera: 'R3', pause: '☰', map: '⧉', nvg: '↑', plate: '↓', heal: '←', killstreak: '→' };
-    const ps: Partial<Record<Action, string>> = { jump: '✕', crouch: '◯', reload: '▢', interact: '▢', weaponNext: '△', grenade: 'L1', melee: 'R1', ads: 'L2', fire: 'R2', sprint: 'L3', camera: 'R3', pause: 'OPT', map: 'PAD', nvg: '↑', plate: '↓', heal: '←', killstreak: '→' };
+    const xbox: Partial<Record<Action, string>> = { jump: 'A', crouch: 'B', reload: 'X', interact: 'X', weaponNext: 'Y', grenade: 'LB', melee: 'RB', ads: 'LT', fire: 'RT', sprint: 'L3', camera: 'R3', pause: '☰', map: '⧉', nvg: '⧉', ping: '↑', plate: '↓', heal: '←', killstreak: '→' };
+    const ps: Partial<Record<Action, string>> = { jump: '✕', crouch: '◯', reload: '▢', interact: '▢', weaponNext: '△', grenade: 'L1', melee: 'R1', ads: 'L2', fire: 'R2', sprint: 'L3', camera: 'R3', pause: 'OPT', map: 'PAD', nvg: 'PAD', ping: '↑', plate: '↓', heal: '←', killstreak: '→' };
     const lumos: Partial<Record<Action, string>> = { ...xbox, pause: 'MENU', map: 'VIEW', jump: 'Ⓐ', crouch: 'Ⓑ', reload: 'Ⓧ', interact: 'Ⓧ', weaponNext: 'Ⓨ' };
     const kb: Partial<Record<Action, string>> = { jump: 'SPACE', crouch: 'C', reload: 'R', interact: 'F', weaponNext: 'WHEEL', grenade: 'G', melee: 'V', ads: 'RMB', fire: 'LMB', sprint: 'SHIFT', camera: 'T', pause: 'ESC', map: 'M', nvg: 'N', plate: 'X', heal: 'H', killstreak: 'B', leanL: 'Q', leanR: 'E', inspect: 'I', slot1: '1', slot2: '2', slot3: '3', emote: 'J', scoreboard: 'TAB' };
     const touch: Partial<Record<Action, string>> = { interact: 'TAP', reload: '⟳' };
