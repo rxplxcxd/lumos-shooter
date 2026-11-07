@@ -162,15 +162,24 @@ select, input { background: var(--panel-2); color: var(--text); border: 1px soli
 .zone-timer { left: 24px; top: 120px; font-size: 16px; }
 .round { left: 30px; bottom: 120px; font-size: 64px; color: #b31212; font-weight: 700; text-shadow: 0 0 12px rgba(255, 0, 0, 0.5); }
 .points { right: 26px; bottom: 130px; font-size: 24px; color: var(--accent); }
-.scope { inset: 0; background: radial-gradient(circle at 50% 50%, transparent 0 32vh, #000 32.4vh); }
-.scope::before, .scope::after { content: ''; position: absolute; background: #000; }
-.scope::before { left: 50%; top: 18vh; bottom: 18vh; width: 2px; margin-left: -1px; }
-.scope::after { top: 50%; left: calc(50% - 32vh); right: calc(50% - 32vh); height: 2px; margin-top: -1px; }
+.scope, .optic { inset: 0; overflow: hidden; transition: none; }
+.scope .lens, .optic .lens { position: absolute; left: 50%; top: 50%; border-radius: 50%; will-change: transform;
+  box-shadow: 0 0 0 220vmax #000, inset 0 0 5vh 1.6vh rgba(0, 0, 0, 0.9), inset 0 0 0 0.5vh #020202;
+  background: radial-gradient(circle at 34% 28%, rgba(170, 205, 255, 0.10), transparent 38%), radial-gradient(circle, transparent 58%, rgba(0, 10, 20, 0.38) 100%); }
+.scope .lens { width: 78vh; height: 78vh; margin: -39vh 0 0 -39vh; }
+.scope .ret, .optic .ret { position: absolute; left: 50%; top: 50%; pointer-events: none; }
+.scope .ret { width: 78vh; height: 78vh; margin: -39vh 0 0 -39vh; }
+.optic .lens { width: 60vh; height: 60vh; margin: -30vh 0 0 -30vh; box-shadow: 0 0 0 220vmax rgba(4, 6, 8, 0.97), inset 0 0 4vh 1.2vh rgba(0, 0, 0, 0.88), inset 0 0 0 1.4vh #0b0d0f; }
+.optic .ret { width: 60vh; height: 60vh; margin: -30vh 0 0 -30vh; }
+.optic .chev { stroke: #ff4a1a; filter: drop-shadow(0 0 2px #ff4a1a); }
+.optic .bdc { stroke: #111; }
+.optic.thermal .chev { stroke: #fff; filter: none; }
+.optic.thermal .bdc { stroke: #fff; }
+.optic.thermal .lens { box-shadow: 0 0 0 220vmax rgba(10, 12, 10, 0.98), inset 0 0 3vh 1vh rgba(0, 0, 0, 0.7), inset 0 0 0 1.4vh #1a1c1a; }
+.scope-blink { inset: 0; background: #000; opacity: 0; pointer-events: none; }
 .reticle { left: 50%; top: 50%; width: 0; height: 0; }
-.reticle::before { content: ''; position: absolute; left: -3px; top: -3px; width: 6px; height: 6px; border-radius: 50%; background: #ff2a2a; box-shadow: 0 0 6px #ff2a2a; }
-.reticle::after { content: ''; position: absolute; left: -46px; top: -46px; width: 92px; height: 92px; border-radius: 50%; border: 2px solid rgba(20, 20, 20, 0.55); box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.0); }
-.reticle.acog::before, .reticle.thermal::before { width: 0; height: 0; left: -8px; top: -2px; border-radius: 0; background: transparent; border-left: 8px solid transparent; border-right: 8px solid transparent; border-bottom: 12px solid #ff3a1a; box-shadow: none; }
-.reticle.acog::after, .reticle.thermal::after { left: -160px; top: -160px; width: 320px; height: 320px; border: 26px solid rgba(8, 10, 12, 0.92); box-shadow: 0 0 0 2000px rgba(0, 0, 0, 0.88); }
+.reticle::before { content: ''; position: absolute; left: -3px; top: -3px; width: 6px; height: 6px; border-radius: 50%; background: #ff2a2a; box-shadow: 0 0 6px #ff2a2a, 0 0 2px #fff inset; }
+.reticle::after { content: ''; position: absolute; left: -46px; top: -46px; width: 92px; height: 92px; border-radius: 50%; border: 2px solid rgba(255, 60, 40, 0.35); }
 .fps { left: 8px; top: 2px; font-size: 12px; color: var(--muted); font-family: monospace; }
 .end { inset: 0; display: grid; place-items: center; background: rgba(5, 8, 12, 0.75); pointer-events: auto; }
 .end .box { text-align: center; }

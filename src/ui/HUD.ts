@@ -9,6 +9,8 @@ const h = (tag: string, cls = '', html = '') => { const e = document.createEleme
 
 /** Warzone-style HUD: vitals/plates, ammo, minimap & compass, killfeed, hitmarkers, damage
  * direction, prompts with device-specific glyphs, vehicle HUD, scope overlay, buy menu, pause. */
+const THREE_clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
+
 export class HUD {
   root = h('div', 'hud');
   private w: GameWorld;
@@ -20,6 +22,8 @@ export class HUD {
   private dmgDirs: { el: HTMLElement; ang: number; t: number; from: THREE.Vector3 }[] = [];
   private bigMap = false;
   private uiAccum = 0;
+  private lensX = 0;
+  private lensY = 0;
   private unsub: (() => void)[] = [];
   onPause: (() => void) | null = null;
   onQuit: (() => void) | null = null;
@@ -38,7 +42,12 @@ export class HUD {
     mm.appendChild(this.mapCanvas);
     this.mapCtx = this.mapCanvas.getContext('2d')!;
     add('killfeed', 'killfeed');
-    add('scope', 'scope hidden');
+    // sniper scope: lens with parallax shadow + mil-dot reticle (SVG)
+    const md = [8, 16, 24, 32].flatMap((d) => [`<circle cx="${d}" cy="0" r="0.9"/>`, `<circle cx="${-d}" cy="0" r="0.9"/>`, `<circle cx="0" cy="${d}" r="0.9"/>`, `<circle cx="0" cy="${-d}" r="0.9"/>`]).join('');
+    add('scope', 'scope hidden', `<div class="lens"></div><svg viewBox="-100 -100 200 200" class="ret"><g fill="#060606" stroke="#060606"><path d="M-100 0H-38M38 0H100M0 -100V-38M0 38V100" stroke-width="2.6"/><path d="M-38 0H38M0 -38V38" stroke-width="0.32"/>${md}<path d="M-3 46H3M-2.4 54H2.4M-1.8 62H1.8" stroke-width="0.5"/></g><circle r="0.75" fill="#ff2a1a"/></svg>`);
+    // magnified optics (3.5x / thermal): smaller eyepiece with a BDC chevron
+    add('optic', 'optic hidden', `<div class="lens"></div><svg viewBox="-100 -100 200 200" class="ret"><path class="chev" d="M-5 7L0 0L5 7" fill="none" stroke-width="1.6"/><g class="bdc" stroke-width="0.6"><path d="M-3 18H3M-2.2 28H2.2M-1.6 37H1.6M0 9V40"/></g></svg>`);
+    add('blink', 'scope-blink');
     add('reticle', 'reticle hidden');
     add('cross', 'crosshair', '<i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><i class="dot"></i>');
     add('hit', 'hitmarker');
@@ -193,11 +202,28 @@ export class HUD {
     ch.style.display = hideCross || !s.alive ? 'none' : '';
     (ch.children[0] as HTMLElement).style.top = `${-px - 8}px`; (ch.children[1] as HTMLElement).style.top = `${px}px`;
     (ch.children[2] as HTMLElement).style.left = `${-px - 8}px`; (ch.children[3] as HTMLElement).style.left = `${px}px`;
-    this.els.scope.classList.toggle('hidden', !(wp.stats.scope && s.ads > 0.92 && !p.thirdPerson));
     const optic = wp.attachments.find((a) => a === 'reddot' || a === 'acog' || a === 'thermal');
+    const canScope = !p.thirdPerson && s.alive && !s.inVehicle;
+    const sst = (x: number, a: number, b: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+    const sniper = !!wp.stats.scope && canScope;
+    const magnified = !sniper && (optic === 'acog' || optic === 'thermal' || wp.def.cls === 'launcher') && canScope;
+    // scope-in: brief dark "blink" hides the swap from view-model to eyepiece
+    this.els.blink.style.opacity = sniper || magnified ? String(Math.max(0, 1 - Math.abs(s.ads - 0.9) / 0.08) * (sniper ? 0.95 : 0.6)) : '0';
+    // lens shadow drifts with look / move inertia (reticle stays centred = where the bullet goes)
+    const lx = THREE_clamp(-w.input.lookX * 0.9 + (s.vel.x * Math.cos(p.yaw) - s.vel.z * Math.sin(p.yaw)) * -2.2, -48, 48);
+    const ly = THREE_clamp(w.input.lookY * 0.9 + (s.grounded ? 0 : s.vel.y * 2), -40, 40);
+    this.lensX += (lx - this.lensX) * Math.min(1, dt * 7); this.lensY += (ly - this.lensY) * Math.min(1, dt * 7);
+    const lensT = `translate(${this.lensX.toFixed(1)}px, ${this.lensY.toFixed(1)}px)`;
+    this.els.scope.classList.toggle('hidden', !(sniper && s.ads > 0.86));
+    if (sniper) { this.els.scope.style.opacity = String(sst(s.ads, 0.86, 0.95)); (this.els.scope.firstChild as HTMLElement).style.transform = lensT; }
+    this.els.optic.classList.toggle('hidden', !(magnified && s.ads > 0.86));
+    if (magnified) {
+      this.els.optic.style.opacity = String(sst(s.ads, 0.86, 0.95));
+      this.els.optic.classList.toggle('thermal', optic === 'thermal');
+      (this.els.optic.firstChild as HTMLElement).style.transform = lensT;
+    }
     const ret = this.els.reticle;
-    ret.classList.toggle('hidden', !(optic && !wp.stats.scope && s.ads > 0.8 && !p.thirdPerson && s.alive));
-    ret.className = `reticle ${optic ?? ''}${ret.classList.contains('hidden') ? ' hidden' : ''}`;
+    ret.classList.toggle('hidden', !(optic === 'reddot' && !wp.stats.scope && s.ads > 0.8 && canScope));
     // throttled DOM updates
     this.uiAccum += dt;
     if (this.uiAccum < 0.1) return;

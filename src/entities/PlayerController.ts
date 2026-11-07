@@ -6,6 +6,7 @@ import type { Vehicle, VehicleControls } from '../vehicles/Vehicle';
 import { Grenade } from '../weapons/Grenade';
 import type { Actor } from '../gameplay/types';
 import type { Weapon } from '../weapons/Weapon';
+import { calibrateSights, type SightCalib } from '../weapons/SightCalib';
 
 const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3();
 
@@ -174,6 +175,7 @@ export class PlayerController {
     // thermal optic / NVG post FX
     const thermal = s.weapon.stats.thermal && s.ads > 0.85;
     w.engine.setPost(s.underwater ? 'underwater' : thermal ? 'thermal' : this.nvg ? 'nvg' : 'none');
+    w.setThermal(thermal, dt);
     // weapon light at night
     const light = s.weapon.attachments.includes('flashlight') || w.sky.isNight;
     this.flashlight.intensity = light && !this.thirdPerson ? 60 : 0;
@@ -490,6 +492,8 @@ export class PlayerController {
     holder.add(obj);
     holder.userData.muzzle = (obj.userData.muzzle as THREE.Vector3)?.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI) ?? new THREE.Vector3(0, 0, -0.5);
     holder.userData.sightY = (obj.userData.box as THREE.Box3)?.max.y ?? 0.08;
+    const opticId = wp.attachments.find((a) => a === 'reddot' || a === 'acog' || a === 'thermal' || a === 'sniperscope') ?? null;
+    holder.userData.calib = calibrateSights(holder, wp.def, opticId);
     this.vmGun = holder;
     this.vm.add(holder);
   }
@@ -534,8 +538,8 @@ export class PlayerController {
     const len = wp.def.length;
     // ---- base poses
     const hip = new THREE.Vector3(0.15 + len * 0.05, -0.15 - len * 0.03, -0.3 - len * 0.42);
-    const sightY = this.vmGun.userData.sightY as number;
-    const adsP = new THREE.Vector3(0, -0.035 - sightY * 0.55, -0.26 - len * 0.48);
+    const calib = this.vmGun.userData.calib as SightCalib;
+    const adsP = calib.pos.clone();
     const target = hip.lerp(adsP, s.ads);
     const tr = new THREE.Vector3();
     // ---- walk / sprint bob (figure-8), idle breathing
@@ -605,10 +609,12 @@ export class PlayerController {
     this.vmRot.addScaledVector(this.vmRotV, dt);
     const g = this.vmGun;
     g.position.lerp(target, Math.min(1, dt * 16)).add(this.vmPos.clone().multiplyScalar(0.12));
-    g.rotation.set(tr.x + this.vmRot.x * 0.12, tr.y + this.vmRot.y * 0.12, tr.z + this.vmRot.z * 0.12);
-    // look *through* optics: hide the opaque optic model while aiming (HUD draws the reticle)
+    g.rotation.set(tr.x + calib.tilt * s.ads + this.vmRot.x * 0.12, tr.y + this.vmRot.y * 0.12, tr.z + this.vmRot.z * 0.12);
+    // look *through* optics: the opaque optic model fades out (HUD draws the reticle / lens);
+    // magnified optics and sniper scopes hide the whole view-model so the sight picture is clean
     const optic = g.getObjectByName('att_optic');
     if (optic) optic.visible = s.ads < 0.8;
+    g.visible = !(calib.kind !== 'iron' && calib.kind !== 'reflex' && s.ads > 0.9 && !this.thirdPerson);
     // consumable item while healing / plating
     if (s.busyT > 0 && (s.busyKind === 'heal' || s.busyKind === 'plate' || s.busyKind === 'syringe')) {
       const want = s.busyKind === 'plate' ? 'item_vest' : s.busyKind === 'syringe' ? 'item_syringe' : 'item_medkit';

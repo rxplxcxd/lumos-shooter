@@ -143,6 +143,27 @@ export class GameWorld {
     return this.actors.filter((a) => a.alive && a.pos.distanceToSquared(p) < r2 + 4);
   }
 
+  private thermalOn = false;
+  private thermalT = 0;
+  /** thermal optic: sky reads cold, living bodies glow hot (emissive override on their materials) */
+  setThermal(on: boolean, dt = 0) {
+    this.thermalT -= dt;
+    if (on === this.thermalOn && (!on || this.thermalT > 0)) return;
+    this.thermalOn = on; this.thermalT = 0.5;
+    this.sky.dome.visible = !on;
+    for (const a of this.actors) {
+      const root = (a as unknown as { model?: { root: THREE.Object3D } }).model?.root;
+      if (!root) continue;
+      const hot = on && a.alive;
+      root.traverse((o) => {
+        const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+        if (!m || !(o as THREE.Mesh).isMesh || !('emissive' in m)) return;
+        if (hot && m.userData.thermalE === undefined) { m.userData.thermalE = m.emissive.getHex(); m.userData.thermalI = m.emissiveIntensity; m.emissive.setRGB(1, 0.95, 0.85); m.emissiveIntensity = 1.6; }
+        else if (!hot && m.userData.thermalE !== undefined) { m.emissive.setHex(m.userData.thermalE); m.emissiveIntensity = m.userData.thermalI; delete m.userData.thermalE; }
+      });
+    }
+  }
+
   addActor(a: Actor) { this.actors.push(a); if (a.kind === 'soldier') this.soldiers.push(a as Soldier); }
   removeActor(a: Actor) { this.actors = this.actors.filter((x) => x !== a); this.soldiers = this.soldiers.filter((x) => x !== a); }
 
@@ -295,6 +316,7 @@ export class GameWorld {
   }
 
   dispose() {
+    if (this.thermalOn) { this.thermalT = 0; this.setThermal(false); }
     this.net?.dispose(); this.net = null;
     this.ambient?.dispose();
     for (const v of [...this.vehicles]) v.dispose();

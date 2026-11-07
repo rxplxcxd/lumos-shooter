@@ -28,7 +28,8 @@ void main(){
     l = pow(clamp(l * 3.2 + n, 0.0, 1.0), 0.8);
     c = vec3(0.12, 1.0, 0.25) * l * (0.92 + 0.08 * sin(uv.y * 800.0));
   } else if (mode == 2) {
-    float t = clamp(l * 1.4, 0.0, 1.0);
+    // cold world, hot bodies (characters get an emissive boost while the optic is active)
+    float t = clamp(pow(clamp(l, 0.0, 1.6), 1.7) * 1.05, 0.0, 1.0);
     c = mix(vec3(0.02, 0.02, 0.18), vec3(0.6, 0.0, 0.6), smoothstep(0.0, 0.35, t));
     c = mix(c, vec3(1.0, 0.45, 0.0), smoothstep(0.35, 0.7, t));
     c = mix(c, vec3(1.0, 1.0, 0.85), smoothstep(0.7, 1.0, t));
