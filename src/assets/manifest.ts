@@ -116,8 +116,10 @@ export const KITS = {
   city_lod: 'kits/city_lod',
   nature: 'kits/nature',
   nature_lod: 'kits/nature_lod',
+  nature_lod2: 'kits/nature_lod2',
   guns: 'kits/guns',
   street: 'kits/streetprops',
+  cityprops: 'kits/cityprops',
   attachments: 'kits/attachments',
 } as const;
 export type KitId = keyof typeof KITS;

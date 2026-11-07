@@ -165,6 +165,7 @@ export class PlayerController {
     if (inp.pressed('heal')) s.tryHeal();
     if (inp.pressed('plate')) s.tryPlate();
     if (inp.pressed('nvg')) { this.nvg = !this.nvg; w.audio.ui(this.nvg ? 'popup_open' : 'popup_close'); }
+    if (inp.pressed('ping') && s.alive) this.ping();
     if (inp.pressed('camera')) { this.thirdPerson = !this.thirdPerson; settings.set('thirdPerson', this.thirdPerson); }
     if (inp.pressed('emote')) s.model.setLoco('dance', 0.3);
     s.updateWeapon(dt);
@@ -629,6 +630,40 @@ export class PlayerController {
       }
       if (this.vmItem) { const kk = 1 - s.busyT / (s.busyKind === 'heal' ? 3.5 : 1.1); this.vmItem.visible = true; this.vmItem.position.set(-0.05, -0.22 + Math.sin(kk * Math.PI) * 0.08, -0.42); this.vmItem.rotation.set(0.4, 0.6 + kk, 0); }
     } else if (this.vmItem) this.vmItem.visible = false;
+  }
+
+  // ----------------------------------------------------------------- ping
+  private lastPingT = -10;
+  /** Warzone-style contextual ping: enemy under the crosshair > vehicle > loot > location; double tap = danger */
+  private ping() {
+    const w = this.w, s = this.soldier;
+    const eye = w.engine.camera.position.clone();
+    const f = this.forward();
+    const danger = w.time - this.lastPingT < 0.45;
+    this.lastPingT = w.time;
+    const base = { owner: s.name, team: s.team };
+    let best: Actor | null = null, bestA = THREE.MathUtils.degToRad(3.5);
+    const to = new THREE.Vector3();
+    for (const a of w.actors) {
+      if (!a.alive || a === s || (a.kind === 'soldier' && a.team === s.team)) continue;
+      to.copy(a.eyePos(new THREE.Vector3())).sub(eye);
+      const d = to.length();
+      if (d > 400) continue;
+      const ang = to.normalize().angleTo(f);
+      if (ang < bestA && !w.physics.raycast(eye, to, d - 1.2, s.collider)) { bestA = ang; best = a; }
+    }
+    if (best) { w.addPing({ ...base, pos: best.pos.clone().setY(best.pos.y + 2.1), kind: 'enemy', label: best.kind === 'zombie' ? 'Zombie' : 'Feind', actor: best }); return; }
+    const hit = w.physics.raycast(eye, f, 700, s.collider);
+    const pos = hit ? hit.point.clone() : eye.clone().addScaledVector(f, 350);
+    const veh = hit ? w.vehicleOfCollider(hit.collider) : null;
+    if (veh && !veh.destroyed) { w.addPing({ ...base, pos: veh.model.position.clone().setY(veh.model.position.y + 2.5), kind: 'vehicle', label: veh.def.name }); return; }
+    const loot = (w as unknown as { loot?: { items: { pos: THREE.Vector3 }[]; label(it: unknown): string } }).loot;
+    if (loot) {
+      let li: { pos: THREE.Vector3 } | null = null, ld = 3;
+      for (const it of loot.items) { const d = it.pos.distanceTo(pos); if (d < ld) { ld = d; li = it; } }
+      if (li) { w.addPing({ ...base, pos: li.pos.clone().setY(li.pos.y + 0.6), kind: 'loot', label: loot.label(li) }); return; }
+    }
+    w.addPing({ ...base, pos, kind: danger ? 'danger' : 'go', label: danger ? 'Gefahr!' : 'Hierhin' });
   }
 
   // ----------------------------------------------------------------- aim assist

@@ -75,6 +75,7 @@ export class Ballistics {
       if (veh) veh.damage(b.stats.damage * b.dmgMul * (b.stats.explosive ? 1 : 0.6), b.owner);
       if (b.stats.explosive) { w.explode(hit.point, b.stats.explosive.radius, b.stats.explosive.damage, b.owner, b.stats.id); return true; }
       w.destructibleHit(hit.collider, b.stats.damage * b.dmgMul, hit.point);
+      w.knock?.hit(hit.collider, dir, hit.point, b.stats.damage * b.dmgMul * 0.35);
       // penetration
       const hard = HARDNESS[surf] ?? 2;
       if (b.stats.penetration >= hard && b.dmgMul > 0.4) {

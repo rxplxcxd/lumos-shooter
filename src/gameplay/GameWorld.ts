@@ -1,3 +1,6 @@
+import { MatchStats } from './MatchStats';
+import { Knockables } from '../world/Knockables';
+import { StreetLights } from '../world/StreetLights';
 import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import type { Engine } from '../core/Engine';
@@ -39,6 +42,8 @@ interface Destructible { collider: RAPIER.Collider; obj: THREE.Object3D; hp: num
  * The running match world: owns physics, terrain, water, sky, actors, vehicles, projectiles,
  * effects and interaction points. Game modes plug in via the Mode interface.
  */
+export interface Ping { id: number; pos: THREE.Vector3; kind: 'go' | 'enemy' | 'loot' | 'vehicle' | 'danger'; label: string; owner: string; team: number; actor?: Actor | null; t: number }
+
 export class GameWorld {
   engine: Engine; assets: AssetManager; audio: AudioSys; input: Input;
   scene: THREE.Scene;
@@ -69,11 +74,32 @@ export class GameWorld {
   lowSpec: boolean;
   ambient: AmbientLife | null = null;
   net: NetSync | null = null;
+  knock: Knockables | null = null;
+  lights: StreetLights | null = null;
+  stats: MatchStats;
+  /** squad pings (location / enemy / loot / vehicle / danger) shown in the world and on the minimap */
+  pings: Ping[] = [];
 
   constructor(engine: Engine, assets: AssetManager, audio: AudioSys, input: Input) {
     this.engine = engine; this.assets = assets; this.audio = audio; this.input = input;
     this.scene = engine.scene;
     this.lowSpec = QUALITY_PRESETS[settings.data.quality].lowSpecMaterials;
+    this.stats = new MatchStats(this);
+  }
+
+  addPing(p: Omit<Ping, 't' | 'id'>, fromNet = false) {
+    // one location ping per owner at a time (like Warzone), enemy pings stack
+    if (p.kind === 'go' || p.kind === 'danger') this.pings = this.pings.filter((x) => !(x.owner === p.owner && (x.kind === 'go' || x.kind === 'danger')));
+    const ping: Ping = { ...p, t: p.kind === 'enemy' ? 5 : 12, id: Math.random() };
+    this.pings.push(ping);
+    if (this.pings.length > 12) this.pings.shift();
+    this.bus.emit('ping', ping);
+    this.audio.play(p.kind === 'enemy' || p.kind === 'danger' ? 'ui_error' : 'ui_select', { volume: 0.5 });
+    if (!fromNet && this.net) this.net.sendPing(ping);
+    // squad bots follow location / loot pings of their teammates
+    if ((p.kind === 'go' || p.kind === 'loot' || p.kind === 'vehicle') && this.mode) {
+      for (const b of ((this.mode as unknown as { bots?: { s: Soldier; command(v: THREE.Vector3): void }[] }).bots ?? [])) if (b.s.team === p.team && b.s.alive) b.command(p.pos);
+    }
   }
 
   async init(terrain: Terrain, opts: { time?: number; weather?: 'clear' | 'overcast' | 'fog' | 'rain'; timeSpeed?: number } = {}) {
@@ -103,6 +129,12 @@ export class GameWorld {
     }).catch(() => {});
     this.ballistics = new Ballistics(this);
     if (q.ambientLife) this.ambient = new AmbientLife(this);
+    this.knock = new Knockables(this);
+    const nLights = ({ potato: 0, low: 2, medium: 4, high: 6, ultra: 8 } as Record<string, number>)[settings.data.quality] ?? 4;
+    this.lights = new StreetLights(this, nLights);
+    // birds take off at gunfire / explosions
+    this.bus.on('shot', (e: { pos: THREE.Vector3; silenced?: boolean }) => { if (!e.silenced) this.ambient?.scare(e.pos); });
+    this.bus.on('playerFired', (s: Soldier) => { if (!s.weapon.stats.silenced) this.ambient?.scare(s.pos); });
   }
 
   // ------------------------------------------------------------------ registries
@@ -170,6 +202,8 @@ export class GameWorld {
   // ------------------------------------------------------------------ combat events
   explode(p: THREE.Vector3, radius: number, damage: number, attacker: Actor | null, weapon = 'explosive') {
     this.effects.explosion(p, radius / 7);
+    this.knock?.explode(p, radius * 1.6, 7);
+    this.ambient?.scare(p);
     const d = p.distanceTo(this.audio.listener);
     this.audio.play(d > 120 ? 'explosion_far' : radius > 7 ? 'explosion_large' : 'explosion_medium', { pos: p, volume: 1, maxDist: 900 });
     if (d < 40) { this.player?.shake(Math.max(0, 1 - d / 40) * 1.2); this.input.rumble(1 - d / 40, 1 - d / 40, 400); }
@@ -299,6 +333,11 @@ export class GameWorld {
     this.water.update(this.time, this.sky.sunDir, this.sky.fog, this.sky.brightness, cam.position);
     this.effects.update(dt);
     this.ambient?.update(dt);
+    this.knock?.update(dt);
+    this.lights?.update(dt);
+    this.stats.update();
+    for (const p of this.pings) { p.t -= dt; if (p.actor) { if (!p.actor.alive) p.t = Math.min(p.t, 0.5); else p.pos.copy(p.actor.pos).y += 2.1; } }
+    if (this.pings.some((p) => p.t <= 0)) this.pings = this.pings.filter((p) => p.t > 0);
     this.audio.updateListener(cam);
   }
 
@@ -319,6 +358,8 @@ export class GameWorld {
     if (this.thermalOn) { this.thermalT = 0; this.setThermal(false); }
     this.net?.dispose(); this.net = null;
     this.ambient?.dispose();
+    this.lights?.dispose(); this.lights = null;
+    this.knock?.dispose(); this.knock = null;
     for (const v of [...this.vehicles]) v.dispose();
     for (const s of this.soldiers) s.dispose();
     this.actors.forEach((a) => (a as any).dispose?.());

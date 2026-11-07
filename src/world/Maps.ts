@@ -3,6 +3,7 @@ import type { GameWorld } from '../gameplay/GameWorld';
 import { Terrain, type Flat, type Road, type Surface } from './Terrain';
 import { Rng } from './Noise';
 import { batchStatic, Scatter } from './StaticBatcher';
+import { buildCity, dressPOI, lampRow } from './City';
 import { Vehicle } from '../vehicles/Vehicle';
 import { settings, QUALITY_PRESETS } from '../core/Settings';
 import { applyWind } from './Wind';
@@ -32,7 +33,11 @@ export class MapBuilder {
     this.w = w; this.rng = new Rng(seed);
     this.scatter = new Scatter(QUALITY_PRESETS[settings.data.quality].drawDistance);
     w.root.add(this.scatter.root);
-    w.updaters.push(() => this.scatter.update(w.engine.camera.position));
+    w.updaters.push(() => {
+      const cam = w.engine.camera.position;
+      this.scatter.update(cam);
+      for (const c of this.culled) { const d2 = (c.center.x - cam.x) ** 2 + (c.center.z - cam.z) ** 2; c.obj.visible = d2 < c.m2 && d2 >= c.min2; }
+    });
   }
 
   groundY(x: number, z: number, r = 3) {
@@ -41,7 +46,7 @@ export class MapBuilder {
   }
 
   /** id = manifest id or kit:<kit>:<piece> */
-  async place(id: string, x: number, z: number, yaw = 0, o: { y?: number; scale?: number; collider?: 'mesh' | 'box' | 'none'; surface?: Surface; batch?: boolean; destructible?: number; loot?: number; noGround?: boolean } = {}) {
+  async place(id: string, x: number, z: number, yaw = 0, o: { y?: number; scale?: number; scaleV?: THREE.Vector3; collider?: 'mesh' | 'box' | 'none'; surface?: Surface; batch?: boolean | THREE.Group; destructible?: number; loot?: number; noGround?: boolean } = {}) {
     let obj: THREE.Object3D;
     try {
       if (id.startsWith('kit:')) { const [, kit, piece] = id.split(':'); obj = await this.w.assets.kitPiece(kit as any, piece); }
@@ -49,6 +54,7 @@ export class MapBuilder {
     } catch (e) { console.warn('place failed', id, e); return null; }
     const size = (obj.userData.size as THREE.Vector3)?.clone() ?? new THREE.Vector3(2, 2, 2);
     if (o.scale) { obj.scale.setScalar(o.scale); size.multiplyScalar(o.scale); }
+    if (o.scaleV) { obj.scale.copy(o.scaleV); size.multiply(o.scaleV); }
     const y = o.y ?? (o.noGround ? 0 : this.groundY(x, z, Math.max(size.x, size.z) * 0.4) - 0.05);
     obj.position.set(x, y, z);
     obj.rotation.y = yaw;
@@ -62,6 +68,7 @@ export class MapBuilder {
     }
     if (collider) this.w.registerSurface(collider, o.surface ?? 'stone');
     if (o.destructible && collider) { this.w.registerDestructible(collider, obj, o.destructible, o.surface ?? 'wood'); this.w.root.add(obj); }
+    else if (o.batch instanceof THREE.Group) o.batch.add(obj);
     else if (o.batch !== false) this.batch.add(obj);
     else this.w.root.add(obj);
     // loot around the footprint
@@ -83,10 +90,26 @@ export class MapBuilder {
   }
 
   /** commit batched geometry to the scene */
-  flush() {
-    const b = batchStatic(this.batch);
+  flush(group?: THREE.Group) {
+    const b = batchStatic(group ?? this.batch);
     this.w.root.add(b);
-    this.batch = new THREE.Group();
+    if (!group) this.batch = new THREE.Group();
+  }
+
+  /** batch a group and show it only between `minDist` and `maxDist` from the camera (per-block culling / LOD) */
+  flushCulled(group: THREE.Group, center: THREE.Vector3, maxDist: number, minDist = 0, shadows = true) {
+    const b = batchStatic(group);
+    if (!shadows) b.traverse((o) => { o.castShadow = false; });
+    this.w.root.add(b);
+    this.culled.push({ obj: b, center: center.clone(), m2: maxDist * maxDist, min2: minDist * minDist });
+    return b;
+  }
+  culled: { obj: THREE.Object3D; center: THREE.Vector3; m2: number; min2: number }[] = [];
+
+  /** footprint of a model / kit piece (cached by the asset manager) */
+  async sizeOf(id: string): Promise<THREE.Vector3> {
+    const obj = id.startsWith('kit:') ? await this.w.assets.kitPiece(id.split(':')[1] as any, id.split(':')[2]) : await this.w.assets.instance(id);
+    return ((obj.userData.size as THREE.Vector3) ?? new THREE.Vector3(10, 10, 10)).clone();
   }
 
   async scatterKit(names: string[], count: number, opts: { avoid: { x: number; z: number; r: number }[]; minH?: number; maxH?: number; maxSlope?: number; scale?: [number, number]; chunk?: number; collider?: number; shadow?: boolean; maxDist?: number; area?: number; center?: [number, number] }) {
@@ -95,11 +118,12 @@ export class MapBuilder {
     for (const name of names) {
       let piece: THREE.Object3D;
       try { piece = await this.w.assets.kitPiece('nature', name); } catch { continue; }
-      let lod: THREE.Object3D | null = null;
+      let lod: THREE.Object3D | null = null, lod2: THREE.Object3D | null = null;
       try { lod = await this.w.assets.kitPiece('nature_lod', name); } catch { lod = null; }
+      if (/Tree|Pine|Bush/.test(name)) try { lod2 = await this.w.assets.kitPiece('nature_lod2', name); } catch { lod2 = null; }
       if (QUALITY_PRESETS[settings.data.quality].wind && !/Rock|Pebble|RockPath/.test(name)) {
         const amt = /Grass|Fern|Flower|Plant|Bush|Mushroom/.test(name) ? 0.09 : 0.012;
-        for (const p of [piece, lod]) p?.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) (Array.isArray(m.material) ? m.material : [m.material]).forEach((mt) => applyWind(mt, amt)); });
+        for (const p of [piece, lod, lod2]) p?.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) (Array.isArray(m.material) ? m.material : [m.material]).forEach((mt) => applyWind(mt, amt)); });
       }
       const mats: THREE.Matrix4[] = [];
       let tries = 0;
@@ -115,7 +139,7 @@ export class MapBuilder {
         mats.push(new THREE.Matrix4().compose(new THREE.Vector3(x, h - 0.1, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.rng.next() * 6.28), new THREE.Vector3(s, s, s)));
         if (opts.collider) this.w.physics.addBox(new THREE.Vector3(x, h + 2, z), new THREE.Vector3(opts.collider * s, 2, opts.collider * s));
       }
-      this.scatter.add(piece, mats, opts.chunk ?? 200, opts.shadow ?? true, opts.maxDist, lod, 90);
+      this.scatter.add(piece, mats, opts.chunk ?? 200, opts.shadow ?? true, opts.maxDist, lod, 80, lod2, 190);
     }
   }
 }
@@ -140,11 +164,21 @@ export async function buildBRMap(w: GameWorld, seed: number, progress: Progress)
   // runway
   for (let x = -470; x <= -190; x += 28) flats.push({ x, z: 390, r: 18, h: 10, blend: 30, color: [0.32, 0.32, 0.34] });
   const c = pois[0];
-  const roads: Road[] = pois.slice(1).map((p) => ({ pts: [[c.x, c.z], [(c.x + p.x) / 2 + (p.z - c.z) * 0.12, (c.z + p.z) / 2 - (p.x - c.x) * 0.12], [p.x, p.z]] as [number, number][], width: 9 }));
-  // city grid streets
-  for (const off of [-102, -34, 34, 102]) {
-    roads.push({ pts: [[c.x + off, c.z - 140], [c.x + off, c.z + 140]], width: 12 });
-    roads.push({ pts: [[c.x - 140, c.z + off], [c.x + 140, c.z + off]], width: 12 });
+  // city street grid (kit roads are laid on top; the terrain roads flatten and pave underneath)
+  const offs = [-102, -34, 34, 102], ext = 140;
+  const exits: [number, number][] = [];
+  for (const o of offs) exits.push([c.x - ext, c.z + o], [c.x + ext, c.z + o], [c.x + o, c.z - ext], [c.x + o, c.z + ext]);
+  // country roads start at the nearest city exit instead of cutting through the blocks
+  const roads: Road[] = pois.slice(1).map((p) => {
+    let best = exits[0], bd = 1e12;
+    for (const e of exits) { const d = (e[0] - p.x) ** 2 + (e[1] - p.z) ** 2; if (d < bd) { bd = d; best = e; } }
+    // leave the city straight along the street axis first, then bend towards the POI
+    const out: [number, number] = Math.abs(best[0] - c.x) >= ext - 1 ? [best[0] + Math.sign(best[0] - c.x) * 40, best[1]] : [best[0], best[1] + Math.sign(best[1] - c.z) * 40];
+    return { pts: [best, out, [(out[0] + p.x) / 2 + (p.z - out[1]) * 0.1, (out[1] + p.z) / 2 - (p.x - out[0]) * 0.1], [p.x, p.z]] as [number, number][], width: 9 };
+  });
+  for (const off of offs) {
+    roads.push({ pts: [[c.x + off, c.z - ext], [c.x + off, c.z + ext]], width: 14 });
+    roads.push({ pts: [[c.x - ext, c.z + off], [c.x + ext, c.z + off]], width: 14 });
   }
   roads.push({ pts: [[-470, 390], [-190, 390]], width: 24 });
   roads.push({ pts: [[pois[6].x - 70, pois[6].z], [pois[6].x + 70, pois[6].z]], width: 9 });
@@ -153,31 +187,19 @@ export async function buildBRMap(w: GameWorld, seed: number, progress: Progress)
   const wr = new Rng(seed * 7 + 3);
   const lowQ0 = QUALITY_PRESETS[settings.data.quality].lowSpecMaterials;
   const weather = lowQ0 ? 'clear' : wr.pick(['clear', 'clear', 'clear', 'overcast', 'overcast', 'rain', 'fog'] as const);
-  await w.init(terrain, { time: lowQ0 ? 13 : 9 + wr.next() * 8, weather, timeSpeed: lowQ0 ? 0 : 0.004 });
+  // late drops fly into dusk: the city lights come on during the match
+  await w.init(terrain, { time: lowQ0 ? 13 : 7 + wr.next() * 11, weather, timeSpeed: lowQ0 ? 0 : 0.004 });
   const mb = new MapBuilder(w, seed);
   const R = mb.rng;
+  const lowQ = lowQ0;
 
   progress(0.15, 'Lumos City');
-  // --- city: 3x3 blocks of mixed kit + Sketchfab buildings
-  const lowQ = QUALITY_PRESETS[settings.data.quality].lowSpecMaterials;
-  const cityPieces = lowQ ? ['env_skyscraper', 'env_apartment', 'env_building_shop', 'env_building_shop', 'kit:city_lod:Building_Small_1']
-    : ['kit:city:Building_Large_2', 'kit:city:Building_Medium_2_001', 'kit:city:Building_Small_1', 'env_skyscraper', 'env_apartment', 'env_building_shop'];
-  for (const bx of [-68, 0, 68]) for (const bz of [-68, 0, 68]) {
-    const center = bx === 0 && bz === 0;
-    const slots = center ? [[0, 0]] : [[-12, -12], [12, -12], [-12, 12], [12, 12]];
-    for (const [sx, sz] of slots) {
-      const id = center ? 'env_skyscraper' : R.pick(cityPieces);
-      await mb.place(id, c.x + bx + sx, c.z + bz + sz, R.int(0, 3) * Math.PI / 2, { surface: 'stone', loot: center ? 6 : 3, y: c.h - 0.05 });
-    }
-    // street furniture
-    await mb.place('kit:street:Streetlight_Double', c.x + bx + 26, c.z + bz + 26, 0, { scale: 5.5, collider: 'box', y: c.h, surface: 'metal' });
-    if (R.chance(0.5)) await mb.place('env_barrier', c.x + bx + 30, c.z + bz, Math.PI / 2, { collider: 'box', y: c.h, surface: 'metal' });
-    if (R.chance(0.6)) await mb.place('kit:city:Prop_Planter_Single', c.x + bx - 26, c.z + bz + 26, 0, { y: c.h, surface: 'stone' });
+  const city = await buildCity(mb, c.x, c.z, c.h, offs, ext, R);
+  for (const l of city.lamps) w.lights?.add(l);
+  for (const p of city.parking) {
+    await mb.vehicle(R.pick(['car_cop', 'car_police', 'car_taxi', 'car_sedan', 'car_sport', 'car_suv', 'car_muscle', 'car_hatch', 'car_classic', 'motorcycle', 'hovercar']), p.x, p.z, p.yaw);
   }
-  mb.flush();
-  for (const [vx, vz, yaw] of [[-34, -60, 0], [34, 50, Math.PI], [-80, 34, Math.PI / 2], [70, -34, -Math.PI / 2], [102, 20, 0], [-102, -10, Math.PI], [0, -102, Math.PI / 2], [10, 102, -Math.PI / 2]]) {
-    await mb.vehicle(R.pick(['car_cop', 'car_police', 'car_taxi', 'car_sedan', 'car_sport', 'car_suv', 'car_muscle', 'bus', 'motorcycle', 'car_classic', 'hovercar']), c.x + vx + 4, c.z + vz, yaw);
-  }
+  await mb.vehicle('bus', c.x - 34 + 3, c.z + 68, 0);
 
   progress(0.32, 'Fort Granite');
   const f = pois[1];
@@ -191,6 +213,7 @@ export async function buildBRMap(w: GameWorld, seed: number, progress: Progress)
   for (let i = 0; i < 6; i++) await mb.place('env_barrier', f.x + R.range(-55, 55), f.z + R.range(-55, 55), R.next() * 6, { collider: 'box', surface: 'metal', y: f.h });
   for (let i = 0; i < 6; i++) await mb.place('item_crate', f.x + R.range(-40, 40), f.z + R.range(-40, 40), R.next() * 6, { collider: 'box', surface: 'wood', destructible: 120, scale: 1.4, loot: 1, y: f.h });
   mb.flush();
+  await dressPOI(mb, f.x, f.z, 60, [{ id: 'cityprops:Light', n: 6, lamp: 4.3 }, { id: 'cityprops:TarpCrates', n: 4, surface: 'wood' }, { id: 'cityprops:pallet1', n: 5, mass: 20 }, { id: 'cityprops:Utility', n: 2 }], R, 0.3);
   await mb.vehicle('tank', f.x, f.z - 40, 0);
   await mb.vehicle('apc', f.x - 15, f.z + 45, Math.PI);
   await mb.vehicle('jeep', f.x + 50, f.z - 10, Math.PI / 2);
@@ -203,6 +226,8 @@ export async function buildBRMap(w: GameWorld, seed: number, progress: Progress)
   await mb.place('env_warehouse', h.x + 25, h.z - 40, Math.PI / 4, { surface: 'metal', loot: 4, y: h.h - 0.05 });
   for (let i = 0; i < 10; i++) await mb.place('env_boxes', h.x + R.range(-45, 45), h.z + R.range(-45, 45), R.next() * 6, { collider: 'box', surface: 'wood', destructible: 80, scale: 1.3, y: h.h });
   mb.flush();
+  await dressPOI(mb, h.x, h.z, 70, [{ id: 'cityprops:Light', n: 7, lamp: 4.3 }, { id: 'cityprops:pallet1', n: 8, mass: 20 }, { id: 'cityprops:pallet2', n: 6, mass: 20 }, { id: 'cityprops:TarpCrates', n: 5, surface: 'wood' },
+    { id: 'cityprops:Dumpster', n: 3, mass: 260 }, { id: 'cityprops:Utility', n: 2 }, { id: 'cityprops:TrashCanLarge', n: 4, mass: 30 }, { id: 'city:Prop_Bollard', n: 10 }], R, 0.25);
   const shore = (dist: number, ang: number) => [h.x + Math.cos(ang) * dist, h.z + Math.sin(ang) * dist] as const;
   let [sx, sz] = shore(120, 0.75); await mb.vehicle('speedboat', sx, sz, 0.75);
   [sx, sz] = shore(115, 0.45); await mb.vehicle('boat', sx, sz, 0.4);
@@ -216,6 +241,8 @@ export async function buildBRMap(w: GameWorld, seed: number, progress: Progress)
   await mb.place('env_warehouse', a.x, a.z - 50, 0, { surface: 'metal', loot: 6, y: a.h - 0.05 });
   await mb.place('env_warehouse', a.x + 40, a.z - 50, 0, { surface: 'metal', loot: 4, y: a.h - 0.05 });
   mb.flush();
+  await dressPOI(mb, a.x, a.z - 40, 45, [{ id: 'cityprops:Light', n: 5, lamp: 4.3 }, { id: 'cityprops:TarpCrates', n: 3, surface: 'wood' }, { id: 'cityprops:pallet2', n: 4, mass: 20 }, { id: 'cityprops:Utility', n: 2 }], R, 0.2);
+  for (let x = -460; x <= -200; x += 26) for (const dz of [-12.5, 12.5]) w.lights?.add(new THREE.Vector3(x, terrain.getHeight(x, 390 + dz) + 0.6, 390 + dz));
   await mb.vehicle('plane_prop', -440, 390, Math.PI / 2, 0.3);
   await mb.vehicle('plane_prop', a.x + 10, a.z - 25, Math.PI / 2, 0.3);
   await mb.vehicle('jet_f16', -400, 405, Math.PI / 2, 0.4);
@@ -227,6 +254,7 @@ export async function buildBRMap(w: GameWorld, seed: number, progress: Progress)
   for (const [dx, dz] of [[-30, -20], [25, -30], [-20, 35]]) await mb.place('env_house', fa.x + dx, fa.z + dz, R.next() * 6, { surface: 'wood', loot: 4 });
   await mb.place('env_warehouse', fa.x + 30, fa.z + 30, 0.3, { surface: 'wood', loot: 5 });
   mb.flush();
+  await dressPOI(mb, fa.x, fa.z, 55, [{ id: 'cityprops:Light', n: 3, lamp: 4.3 }, { id: 'cityprops:TarpCrates', n: 4, surface: 'wood' }, { id: 'cityprops:pallet1', n: 6, mass: 20 }, { id: 'cityprops:TrashCanCap', n: 3, mass: 30 }], R, 0.25);
   await mb.vehicle('tractor', fa.x, fa.z, 0);
   await mb.vehicle('car_hatch', fa.x + 45, fa.z - 5, 1);
   await mb.vehicle('bicycle', fa.x - 40, fa.z, 0.5);
@@ -237,6 +265,8 @@ export async function buildBRMap(w: GameWorld, seed: number, progress: Progress)
   await mb.place('env_warehouses', fc.x + 15, fc.z + 50, Math.PI / 2, { surface: 'metal', loot: 6 });
   for (let i = 0; i < 8; i++) await mb.place('env_boxes', fc.x + R.range(-45, 45), fc.z + R.range(-45, 45), R.next() * 6, { collider: 'box', surface: 'wood', destructible: 80, scale: 1.3 });
   mb.flush();
+  await dressPOI(mb, fc.x, fc.z, 65, [{ id: 'cityprops:Light', n: 6, lamp: 4.3 }, { id: 'cityprops:Dumpster', n: 4, mass: 260 }, { id: 'cityprops:pallet1', n: 8, mass: 20 }, { id: 'cityprops:pallet2', n: 6, mass: 20 },
+    { id: 'cityprops:TarpCrates', n: 4, surface: 'wood' }, { id: 'cityprops:Utility', n: 3 }, { id: 'cityprops:TrashCommercial', n: 4, mass: 30 }], R, 0.3);
   await mb.vehicle('truck', fc.x - 40, fc.z - 30, 0);
   await mb.vehicle('car_suv', fc.x + 45, fc.z - 30, 2);
 
@@ -247,6 +277,19 @@ export async function buildBRMap(w: GameWorld, seed: number, progress: Progress)
     await mb.place('env_house', su.x + dx, su.z + dz, i < 4 ? 0 : Math.PI, { surface: 'wood', loot: 3 });
   }
   mb.flush();
+  await lampRow(mb, su.x - 75, su.z, su.x + 75, su.z, 6.2, 30);
+  {
+    const yard = new THREE.Group();
+    for (let i = 0; i < 8; i++) {
+      const dx = -60 + (i % 4) * 40, side = i < 4 ? -1 : 1;
+      const x = su.x + dx + 5, z = su.z + side * 8.5;
+      await mb.place('kit:cityprops:PostBox', x, z, side < 0 ? 0 : Math.PI, { collider: 'box', surface: 'metal', batch: yard, scale: 0.85 });
+      await mb.w.knock?.add('cityprops', R.pick(['TrashCanLarge', 'TrashCanSmall']), new THREE.Vector3(x + 1.6, terrain.getHeight(x + 1.6, z), z), R.next() * 6, 1, 25);
+      for (const tx of [-9, 9]) await mb.place(`kit:nature:${R.pick(['CommonTree_1', 'CommonTree_2', 'CommonTree_4'])}`, su.x + dx + tx, su.z + side * 13, R.next() * 6, { collider: 'box', surface: 'wood', batch: yard, scale: 0.7 + R.next() * 0.3 });
+      await mb.place(`kit:nature:${R.pick(['Bush_Common', 'Bush_Common_Flowers'])}`, su.x + dx - 4, su.z + side * 10, R.next() * 6, { collider: 'none', batch: yard });
+    }
+    mb.flush(yard);
+  }
   for (const [dx, id] of [[-50, 'car_sedan'], [-10, 'car_sport2'], [30, 'motorcycle'], [60, 'car_roadster']] as [number, string][]) await mb.vehicle(id, su.x + dx, su.z, Math.PI / 2);
 
   progress(0.8, 'Route 9');
@@ -254,6 +297,7 @@ export async function buildBRMap(w: GameWorld, seed: number, progress: Progress)
   await mb.place('env_building_shop', g.x, g.z, 0, { surface: 'stone', loot: 4 });
   await mb.place('env_vending', g.x + 8, g.z + 6, Math.PI, { collider: 'box', surface: 'metal' });
   mb.flush();
+  await dressPOI(mb, g.x, g.z, 24, [{ id: 'cityprops:Light', n: 4, lamp: 4.3 }, { id: 'cityprops:TrashCommercial', n: 3, mass: 30 }, { id: 'cityprops:Dumpster', n: 1, mass: 260 }, { id: 'cityprops:Utility', n: 1 }], R, 0.45);
   await mb.vehicle('car_taxi', g.x + 14, g.z - 8, 0.4);
   await mb.vehicle('motorcycle', g.x - 12, g.z - 6, 2.2);
   // lake craft
@@ -291,6 +335,7 @@ export async function buildBRMap(w: GameWorld, seed: number, progress: Progress)
     const x = p.x + Math.cos(ang) * rr, z = p.z + Math.sin(ang) * rr;
     mb.lootSpots.push(new THREE.Vector3(x, terrain.getHeight(x, z) + 0.05, z));
   }
+  await w.lights?.build();
   const spawnPoints = pois.map((p) => new THREE.Vector3(p.x, p.h + 1, p.z));
   return { name: 'Lumos Island', pois, lootSpots: mb.lootSpots, spawnPoints, bounds: 760, extra: { builder: mb } };
 }

@@ -152,7 +152,7 @@ select, input { background: var(--panel-2); color: var(--text); border: 1px soli
 .killfeed { right: 230px; top: 20px; text-align: right; font-size: 15px; display: flex; flex-direction: column; gap: 4px; }
 .killfeed div { background: rgba(10, 14, 20, 0.55); padding: 2px 8px; border-radius: 4px; animation: fadein .2s; }
 .killfeed .me { color: var(--accent); }
-.toast { left: 50%; top: 24%; transform: translateX(-50%); font-size: 24px; letter-spacing: 1px; text-align: center; color: var(--text); }
+.toast { left: 50%; top: 31%; transform: translateX(-50%); font-size: 24px; letter-spacing: 1px; text-align: center; color: var(--text); }
 .toast div { animation: toast 3s forwards; }
 .story { left: 50%; bottom: 22%; transform: translateX(-50%); max-width: 720px; text-align: center; font-family: var(--font); font-size: 16px; background: rgba(10, 14, 20, 0.75); padding: 12px 18px; border-radius: 8px; border-left: 3px solid var(--accent); }
 .prompt { left: 50%; top: 62%; transform: translateX(-50%); font-size: 18px; background: rgba(10, 14, 20, 0.6); padding: 6px 14px; border-radius: 6px; white-space: nowrap; }
@@ -222,3 +222,55 @@ select, input { background: var(--panel-2); color: var(--text); border: 1px soli
   .touch .btns { transform: scale(0.8); transform-origin: bottom right; }
   .touch .stick { transform: scale(0.85); transform-origin: bottom left; }
 }
+
+/* ---- medals ---- */
+.medals { left: 50%; top: 13%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.medal { display: flex; align-items: center; gap: 10px; padding: 6px 16px 6px 6px; border-radius: 40px; background: linear-gradient(90deg, rgba(10,14,20,.86), rgba(10,14,20,.55)); border: 1px solid rgba(255,190,70,.35);
+  box-shadow: 0 4px 24px rgba(0,0,0,.4), 0 0 18px rgba(255,170,40,.18); animation: medalIn .35s cubic-bezier(.2,1.6,.4,1) both; }
+.medal.out { animation: medalOut .4s ease-in forwards; }
+.medal .ico { width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; font-size: 19px; font-weight: 800; color: #1a1205;
+  background: radial-gradient(circle at 35% 30%, #fff1b8, #ffc23a 45%, #c9861a); box-shadow: inset 0 -3px 0 rgba(0,0,0,.25), 0 0 14px rgba(255,190,60,.55); }
+.medal .txt { display: flex; flex-direction: column; line-height: 1.05; }
+.medal .txt b { font-size: 19px; letter-spacing: 1.5px; color: #fff; }
+.medal .txt i { font-style: normal; font-size: 13px; color: #ffd27a; }
+.medal .txt span { font-size: 12px; color: #9fe39a; letter-spacing: .5px; }
+@keyframes medalIn { from { opacity: 0; transform: scale(.4) translateY(-10px); } to { opacity: 1; transform: none; } }
+@keyframes medalOut { to { opacity: 0; transform: translateY(-14px) scale(.9); } }
+/* ---- floating damage numbers ---- */
+.dmgnums, .pings { inset: 0; pointer-events: none; }
+.dnum { position: absolute; left: 0; top: 0; font-weight: 800; font-size: 20px; text-shadow: 0 2px 0 #000a, 0 0 6px #000a; will-change: transform; }
+.dnum.pop { animation: dnumPop .18s ease-out; }
+@keyframes dnumPop { from { font-size: 28px; } to { font-size: 20px; } }
+/* ---- pings ---- */
+.ping { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; align-items: center; gap: 1px; will-change: transform; text-shadow: 0 1px 2px #000; }
+.ping .pi { font-size: 22px; line-height: 1; filter: drop-shadow(0 0 6px currentColor); animation: pingPulse 1.2s ease-in-out infinite; }
+.ping .pl { font-size: 12px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
+.ping .pd { font-size: 11px; opacity: .85; }
+.ping.k-go { color: #fff; } .ping.k-enemy, .ping.k-danger { color: #ff5a4a; } .ping.k-loot { color: #ffd23a; } .ping.k-vehicle { color: #7ec8ff; }
+.ping.edge .pl { display: none; }
+@keyframes pingPulse { 50% { transform: scale(1.18); } }
+/* ---- end screen stats ---- */
+.stats-grid { display: grid; grid-template-columns: repeat(4, minmax(90px, 1fr)); gap: 10px; margin: 18px auto 10px; max-width: 620px; }
+.stats-grid .st { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08); border-radius: 10px; padding: 10px 6px; display: flex; flex-direction: column; align-items: center; }
+.stats-grid .st b { font-size: 24px; } .stats-grid .st span { font-size: 12px; color: var(--muted); letter-spacing: .5px; }
+.medal-list { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin: 6px auto 10px; max-width: 620px; }
+.medal-list span { padding: 3px 10px; border-radius: 20px; background: rgba(255,190,60,.14); border: 1px solid rgba(255,190,60,.35); color: #ffd27a; font-size: 13px; }
+@media (max-width: 640px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } .medal .txt b { font-size: 15px; } }
+
+/* ---- photo mode ---- */
+body.photo-mode #ui > .hud { display: none; }
+.photo-ui { position: absolute; inset: 0; pointer-events: none; z-index: 30; }
+.photo-ui .bars i { position: absolute; left: 0; right: 0; height: 0; background: #000; transition: height .35s ease; }
+.photo-ui .bars i:first-child { top: 0; } .photo-ui .bars i:last-child { bottom: 0; }
+.photo-ui.letterbox .bars i { height: 11vh; }
+.photo-ui .flash { position: absolute; inset: 0; background: #fff; opacity: 0; }
+.photo-ui .flash.go { animation: shutter .45s ease-out; }
+@keyframes shutter { from { opacity: .85; } to { opacity: 0; } }
+.photo-ui .panel { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); pointer-events: auto; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; justify-content: center;
+  max-width: min(92vw, 860px); padding: 10px 16px; border-radius: 12px; background: rgba(8,11,16,.72); border: 1px solid rgba(255,255,255,.12); backdrop-filter: blur(6px); font-size: 14px; }
+.photo-ui .panel b { letter-spacing: 2px; color: var(--accent, #ffb52e); }
+.photo-ui .panel .keys { width: 100%; text-align: center; font-size: 12px; color: var(--muted); }
+.photo-ui .panel .btns { display: flex; gap: 6px; }
+.photo-ui .panel button { pointer-events: auto; background: rgba(255,255,255,.08); color: #fff; border: 1px solid rgba(255,255,255,.18); border-radius: 8px; padding: 6px 12px; font: inherit; cursor: pointer; }
+.photo-ui .panel button:hover { background: rgba(255,255,255,.16); }
+.photo-ui.hide-panel .panel { display: none; }

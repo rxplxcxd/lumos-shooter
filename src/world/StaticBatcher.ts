@@ -58,7 +58,7 @@ export function batchStatic(group: THREE.Object3D): THREE.Group {
 
 /** Chunked instanced scatter with distance culling (trees, rocks, bushes, grass). */
 export class Scatter {
-  chunks: { center: THREE.Vector3; group: THREE.Group; lod: THREE.Group | null; lodDist: number }[] = [];
+  chunks: { center: THREE.Vector3; group: THREE.Group; lod: THREE.Group | null; lodDist: number; lod2: THREE.Group | null; lod2Dist: number }[] = [];
   root = new THREE.Group();
   constructor(public drawDistance: number) { this.root.name = 'scatter'; }
 
@@ -80,7 +80,7 @@ export class Scatter {
     return g;
   }
 
-  add(piece: THREE.Object3D, transforms: THREE.Matrix4[], chunkSize: number, castShadow = true, maxDist = this.drawDistance, lodPiece: THREE.Object3D | null = null, lodDist = 110) {
+  add(piece: THREE.Object3D, transforms: THREE.Matrix4[], chunkSize: number, castShadow = true, maxDist = this.drawDistance, lodPiece: THREE.Object3D | null = null, lodDist = 110, lod2Piece: THREE.Object3D | null = null, lod2Dist = 210) {
     if (!transforms.length) return;
     const byChunk = new Map<string, THREE.Matrix4[]>();
     const p = new THREE.Vector3();
@@ -94,9 +94,10 @@ export class Scatter {
       const g = this.build(piece, list, castShadow);
       g.userData.maxDist = maxDist;
       this.root.add(g);
-      let lod: THREE.Group | null = null;
+      let lod: THREE.Group | null = null, lod2: THREE.Group | null = null;
       if (lodPiece) { lod = this.build(lodPiece, list, false); lod.visible = false; this.root.add(lod); }
-      this.chunks.push({ center: new THREE.Vector3((cx + 0.5) * chunkSize, 0, (cz + 0.5) * chunkSize), group: g, lod, lodDist: lodDist + chunkSize * 0.5 });
+      if (lod2Piece) { lod2 = this.build(lod2Piece, list, false); lod2.visible = false; this.root.add(lod2); }
+      this.chunks.push({ center: new THREE.Vector3((cx + 0.5) * chunkSize, 0, (cz + 0.5) * chunkSize), group: g, lod, lodDist: lodDist + chunkSize * 0.5, lod2, lod2Dist: lod2Dist + chunkSize * 0.5 });
     }
   }
 
@@ -105,8 +106,10 @@ export class Scatter {
       const d = Math.hypot(c.center.x - cam.x, c.center.z - cam.z);
       const vis = d < (c.group.userData.maxDist as number);
       const far = !!c.lod && d > c.lodDist;
-      c.group.visible = vis && !far;
-      if (c.lod) c.lod.visible = vis && far;
+      const far2 = !!c.lod2 && d > c.lod2Dist;
+      c.group.visible = vis && !far && !far2;
+      if (c.lod) c.lod.visible = vis && far && !far2;
+      if (c.lod2) c.lod2.visible = vis && far2;
     }
   }
 }

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { GameWorld } from '../gameplay/GameWorld';
 
-interface Flock { obj: THREE.Object3D; mixer: THREE.AnimationMixer | null; center: THREE.Vector3; radius: number; speed: number; phase: number; height: number }
+interface Flock { obj: THREE.Object3D; mixer: THREE.AnimationMixer | null; center: THREE.Vector3; radius: number; speed: number; phase: number; height: number; alarm: number; lift: number; ang: number }
 
 /**
  * Makes the world feel inhabited: animated bird flocks (Sketchfab seagulls / ravens) circling over
@@ -24,8 +24,16 @@ export class AmbientLife {
         let mixer: THREE.AnimationMixer | null = null;
         if (anims.length) { mixer = new THREE.AnimationMixer(obj); const a = mixer.clipAction(anims[0]); a.play(); a.time = Math.random() * anims[0].duration; }
         this.w.root.add(obj);
-        this.flocks.push({ obj, mixer, center: center.clone(), radius: radius * (0.7 + Math.random() * 0.6), speed: (kind === 'raven' ? 0.25 : 0.12) * (Math.random() < 0.5 ? -1 : 1), phase: Math.random() * 6.28, height: height + Math.random() * 10 });
+        this.flocks.push({ obj, mixer, center: center.clone(), radius: radius * (0.7 + Math.random() * 0.6), speed: (kind === 'raven' ? 0.25 : 0.12) * (Math.random() < 0.5 ? -1 : 1), phase: Math.random() * 6.28, height: height + Math.random() * 10, alarm: 0, lift: 0, ang: 0 });
       } catch { /* optional */ }
+    }
+  }
+
+  /** gunshots / explosions nearby startle the birds */
+  scare(p: THREE.Vector3, radius = 160) {
+    for (const f of this.flocks) {
+      const dx = f.obj.position.x - p.x, dz = f.obj.position.z - p.z;
+      if (dx * dx + dz * dz < radius * radius) f.alarm = 8 + Math.random() * 4;
     }
   }
 
@@ -34,8 +42,15 @@ export class AmbientLife {
     this.t += dt;
     const cam = w.engine.camera.position;
     for (const f of this.flocks) {
-      const a = f.phase + this.t * f.speed;
-      f.obj.position.set(f.center.x + Math.cos(a) * f.radius, f.center.y + f.height + Math.sin(this.t * 0.4 + f.phase) * 3, f.center.z + Math.sin(a) * f.radius);
+      // startled flocks climb, widen their circle and beat their wings faster for a while
+      f.alarm = Math.max(0, f.alarm - dt);
+      const scared = Math.min(1, f.alarm / 3);
+      f.lift += ((scared * 28) - f.lift) * Math.min(1, dt * (scared > 0 ? 1.2 : 0.15));
+      f.ang += dt * f.speed * (1 + scared * 2.5);
+      const a = f.phase + f.ang;
+      const rad = f.radius * (1 + f.lift / 60);
+      f.obj.position.set(f.center.x + Math.cos(a) * rad, f.center.y + f.height + f.lift + Math.sin(this.t * 0.4 + f.phase) * 3, f.center.z + Math.sin(a) * rad);
+      if (f.mixer) f.mixer.timeScale = 1 + scared * 1.5;
       f.obj.rotation.y = -a + (f.speed > 0 ? Math.PI : 0);
       const d = f.obj.position.distanceTo(cam);
       f.obj.visible = d < 500;

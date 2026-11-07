@@ -52,6 +52,7 @@ export abstract class SoldierMode extends Mode {
     // low-spec: distant bots use the simplified LOD mesh
     const lod = QUALITY_PRESETS[settings.data.quality].lowSpecMaterials;
     await s.init(lod ? 'char_mannequin_lod' : this.rng.pick(['char_mannequin', 'char_mannequin', 'char_mannequin_f']));
+    if (!lod) await s.model.addLod(this.w.assets);
     s.spawnAt(pos);
     this.w.addActor(s);
     const b = new BotBrain(s, this.w, skill);

@@ -47,7 +47,20 @@ export class BotBrain {
     this.pickRoam();
   }
 
+  private commandPos = new THREE.Vector3();
+  private commandUntil = -1;
+  /** squad command from a teammate's ping: head there for a while (fights still take priority) */
+  command(p: THREE.Vector3) {
+    this.commandPos.copy(p);
+    this.commandUntil = this.w.time + 30;
+    if (this.state !== 'engage' && this.state !== 'heal' && this.state !== 'revive') { this.state = 'roam'; this.pickRoam(); }
+  }
+
   pickRoam() {
+    if (this.commandUntil > this.w.time) {
+      if (this.s.pos.distanceTo(this.commandPos) < 6) this.commandUntil = -1;
+      else { this.goal.copy(this.commandPos).add(new THREE.Vector3(rng.range(-4, 4), 0, rng.range(-4, 4))); return; }
+    }
     if (this.waypoints?.length) { this.goal.copy(this.waypoints[Math.floor(rng.next() * this.waypoints.length)]).add(new THREE.Vector3(rng.range(-6, 6), 0, rng.range(-6, 6))); return; }
     const m = this.w.mode as any;
     const z = m?.zoneTarget?.();

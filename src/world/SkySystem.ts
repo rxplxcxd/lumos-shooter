@@ -156,9 +156,11 @@ export class SkySystem {
       old?.dispose();
     }
     // lights
-    this.sun.intensity = (night ? 0.7 : 2.8 * dayK) * overcast;
+    this.sun.intensity = (night ? 0.7 : (this.pmrem ? 3.3 : 2.8) * dayK) * overcast;
     this.sun.color.set(night ? 0x8fa8ff : elev < 12 ? 0xffb070 : 0xfff1dc);
-    this.hemi.intensity = (night ? 0.85 : 0.35 + dayK * 0.85) * (overcast < 1 ? 1.1 : 1);
+    // with an environment map the sky already provides ambient light: keep the fill low so
+    // sun and shadows keep their contrast (no flat, washed-out look)
+    this.hemi.intensity = (night ? 0.85 : this.pmrem ? 0.2 + dayK * 0.5 : 0.35 + dayK * 0.85) * (overcast < 1 ? 1.25 : 1);
     this.hemi.color.set(night ? 0x5a6a9a : 0xbfd8ff);
     this.hemi.groundColor.set(night ? 0x2a2a3a : 0x50603a);
     this.brightness = 0.25 + dayK * 0.75 * overcast;

@@ -241,6 +241,11 @@ export class NetSync {
     s.model.recoilKick(0.5);
   }
 
+  sendPing(p: { pos: THREE.Vector3; kind: string; label: string; actor?: Actor | null }) {
+    const r2 = (v: number) => Math.round(v * 100) / 100;
+    this.net.event({ k: 'ping', p: [r2(p.pos.x), r2(p.pos.y), r2(p.pos.z)], kind: p.kind, label: p.label, a: p.actor ? this.idOf(p.actor) : '' });
+  }
+
   private onEvent(from: string, e: any) {
     const w = this.w;
     switch (e.k) {
@@ -311,6 +316,14 @@ export class NetSync {
         v.body.setRotation({ x: e.q[0], y: e.q[1], z: e.q[2], w: e.q[3] }, true);
         v.body.setLinvel({ x: e.lv[0], y: e.lv[1], z: e.lv[2] }, true);
         v.engineOn = false;
+        break;
+      }
+      case 'ping': {
+        const who = this.resolve(from);
+        const me = w.player?.soldier;
+        if (!me || (who && who.team !== me.team)) break;
+        const actor = e.a ? this.resolve(e.a) : null;
+        w.addPing({ pos: new THREE.Vector3(...(e.p as [number, number, number])), kind: e.kind, label: e.label ?? '', owner: who?.name ?? 'Team', team: me.team, actor }, true);
         break;
       }
       case 'zev': (w.mode as any)?.applyZEvent?.(e.kind, e.id, false); break;

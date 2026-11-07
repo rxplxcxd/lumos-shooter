@@ -63,6 +63,11 @@ All 3D models, sounds and music in Lumos Strike come from **Sketchfab** and **it
 | `weapons/smg` | [Smg](https://sketchfab.com/3d-models/smg-025d25f0f0f444fdb17444a7ca47d06e) | DJMaesen (@bumstrum) | CC Attribution |
 | `weapons/sniper` | [Sniper](https://sketchfab.com/3d-models/sniper-fcd0458ca107414999d7e70413eabd8e) | DJMaesen (@bumstrum) | CC Attribution |
 | `zombies/hazmat` | [Zombie Hazmat](https://sketchfab.com/3d-models/zombie-hazmat-49b3b4307f6a4d2386fdb02354158d04) | LxNazarov (@LxNazarov) | CC Attribution |
+| `g_helmet` | [MICH 2001 military helmet](https://sketchfab.com/3d-models/mich-2001-military-helmet-ad5907514a5343e3aca5ae0357b485a3) | HaizorWill (@HaizorWill) | CC Attribution |
+| `g_backpack` | [Low Poly Game Ready Military Tactical Backpack](https://sketchfab.com/3d-models/low-poly-game-ready-military-tactical-backpack-95a4fc7300584384b56ce3add58dbc9f) | DanlyVostok (@1799danly) | CC Attribution |
+| `g_seagull` | [Seagulls animated](https://sketchfab.com/3d-models/seagulls-animated-73aed843190a4dfda55f2b65cc0f8d63) | vicente betoret ferrero (@deathcow) | CC Attribution |
+| `g_raven` | [Raven](https://sketchfab.com/3d-models/raven-60155d61e6904e87b899a96c4c106792) | David Clowes (@xdavidclowesx) | CC Attribution |
+| `p_cityprops` | [City Props Collection volume 1](https://sketchfab.com/3d-models/city-props-collection-volume-1-32b8b82bb1e9489c993799c91967a916) | TampaJoey (@TampaJoey) | Free Standard |
 
 CC Attribution models are used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Models were re-encoded (Draco geometry, WebP textures) and re-scaled for the web; no other changes.
 

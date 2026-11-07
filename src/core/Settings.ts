@@ -23,6 +23,7 @@ export interface SettingsData {
   musicVolume: number;
   sfxVolume: number;
   showFps: boolean;
+  damageNumbers: boolean;
   thirdPerson: boolean;
   colorblind: boolean;
   playerName: string;
@@ -49,6 +50,7 @@ const DEFAULTS: SettingsData = {
   musicVolume: 0.45,
   sfxVolume: 0.9,
   showFps: true,
+  damageNumbers: true,
   thirdPerson: false,
   colorblind: false,
   playerName: '',

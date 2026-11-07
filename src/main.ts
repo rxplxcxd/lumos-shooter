@@ -13,6 +13,7 @@ import { Menu, type PlayRequest } from './ui/Menu';
 import { Lobby3D } from './ui/Lobby3D';
 import { HUD } from './ui/HUD';
 import { TouchControls } from './ui/Touch';
+import { PhotoMode } from './ui/PhotoMode';
 import { GameWorld } from './gameplay/GameWorld';
 import { BattleRoyale } from './gameplay/modes/BattleRoyale';
 import { Multiplayer } from './gameplay/modes/Multiplayer';
@@ -140,12 +141,16 @@ class App {
     this.hud = new HUD(w, this.ui);
     this.hud.onQuit = () => this.quitMatch();
     this.hud.onPause = () => this.setPaused(false);
+    const photo = new PhotoMode(w, this.input, this.ui);
+    this.hud.onPhoto = () => photo.enter();
+    photo.onExit = () => this.setPaused(true);
     if (TouchControls.wanted()) { this.touch = new TouchControls(this.input, this.ui); }
     this.engine.warmup();
     this.engine.onFixed((dt) => w.fixedUpdate(dt));
     let resultApplied = false;
     this.engine.onUpdate((dt) => {
       this.input.poll(dt);
+      if (photo.active) { photo.update(dt); this.input.endFrame(); return; }
       if (this.input.pressed('pause') && !mode.over) this.setPaused(!this.engine.paused);
       if (!this.engine.paused) {
         w.update(dt);
@@ -156,7 +161,7 @@ class App {
         resultApplied = true;
         const res = mode.result;
         const extracted = r.sub === 'extraction' && res.win ? (mode as BattleRoyale).extractedLoot?.() : undefined;
-        applyMatchResult(this.profile, { xp: res.xp, coins: res.coins, kills: w.player?.soldier.kills ?? 0, win: res.win, mode: r.mode, round: (mode as any).round, egg: (mode as any).eggStage === 3 && res.win, extracted });
+        applyMatchResult(this.profile, { xp: res.xp + w.stats.bonusXp, coins: res.coins, kills: w.player?.soldier.kills ?? 0, win: res.win, mode: r.mode, round: (mode as any).round, egg: (mode as any).eggStage === 3 && res.win, extracted });
         this.backend.saveProfile(this.profile);
         this.backend.pushMatch({ mode: r.mode, sub: r.sub, ...res, kills: w.player?.soldier.kills ?? 0 });
       }

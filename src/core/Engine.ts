@@ -11,7 +11,7 @@ export type PostMode = 'none' | 'nvg' | 'thermal' | 'underwater';
 
 /** final grading / effect pass – runs on the linear HDR buffer before tone mapping */
 const GRADE_FRAG = /* glsl */ `
-uniform sampler2D tDiffuse; uniform float time; uniform int mode; uniform float damage; uniform float flash; uniform float grade; uniform vec2 res;
+uniform sampler2D tDiffuse; uniform float time; uniform int mode; uniform float damage; uniform float flash; uniform float grade; uniform vec2 res; uniform int look;
 varying vec2 vUv;
 float rand(vec2 c){ return fract(sin(dot(c, vec2(12.9898,78.233))) * 43758.5453); }
 void main(){
@@ -36,9 +36,31 @@ void main(){
   } else if (mode == 3) {
     c = mix(c, vec3(0.0, 0.25, 0.35), 0.45) * vec3(0.6, 0.9, 1.0);
   } else if (grade > 0.0) {
-    // filmic grade: gentle saturation, warm highlights, cool shadows
-    c = mix(vec3(l), c, 1.0 + 0.12 * grade);
+    // filmic grade: contrast around mid-grey, gentle saturation, warm highlights, cool shadows
+    c = 0.18 * pow(max(c, vec3(0.0)) / 0.18, vec3(1.0 + 0.09 * grade));
+    l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    c = mix(vec3(l), c, 1.0 + 0.16 * grade);
     c *= mix(vec3(0.96, 0.98, 1.04), vec3(1.04, 1.0, 0.95), smoothstep(0.0, 1.2, l));
+  }
+  // photo-mode looks
+  if (look == 1) { // cinematic: teal shadows / orange highlights, stronger vignette
+    float L = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    c = mix(c * vec3(0.86, 1.0, 1.08), c * vec3(1.12, 1.0, 0.84), smoothstep(0.05, 0.6, L));
+    c *= mix(1.0, smoothstep(0.85, 0.25, d), 0.55);
+  } else if (look == 2) { // noir
+    float L = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    c = vec3(smoothstep(0.02, 0.85, pow(L, 0.9)));
+    c += (rand(uv * res + time) - 0.5) * 0.05;
+    c *= mix(1.0, smoothstep(0.9, 0.3, d), 0.6);
+  } else if (look == 3) { // vivid
+    float L = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    c = mix(vec3(L), c, 1.38);
+    c = 0.18 * pow(max(c, vec3(0.0)) / 0.18, vec3(1.08));
+  } else if (look == 4) { // vintage: warm, faded blacks, soft
+    float L = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    c = mix(vec3(L), c, 0.7) * vec3(1.1, 1.0, 0.82) + vec3(0.025, 0.02, 0.01);
+    c *= mix(1.0, smoothstep(0.95, 0.3, d), 0.5);
+    c += (rand(uv * res + time) - 0.5) * 0.03;
   }
   if (mode == 1 || mode == 2) c *= smoothstep(0.75, 0.35, d);
   else c *= mix(1.0, smoothstep(0.95, 0.35, d), 0.35 * grade);
@@ -103,7 +125,7 @@ export class Engine {
     canvasParent.appendChild(this.renderer.domElement);
     this.camera = new THREE.PerspectiveCamera(settings.data.fov, innerWidth / innerHeight, 0.05, q.far);
     this.postMat = new THREE.ShaderMaterial({
-      uniforms: { tDiffuse: { value: null }, time: { value: 0 }, mode: { value: 0 }, damage: { value: 0 }, flash: { value: 0 }, grade: { value: 0 }, res: { value: new THREE.Vector2(1, 1) } },
+      uniforms: { tDiffuse: { value: null }, time: { value: 0 }, mode: { value: 0 }, damage: { value: 0 }, flash: { value: 0 }, grade: { value: 0 }, res: { value: new THREE.Vector2(1, 1) }, look: { value: 0 } },
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
       fragmentShader: POST_FRAG,
       depthTest: false, depthWrite: false,
@@ -147,7 +169,7 @@ export class Engine {
       c.addPass(this.bloomPass);
     }
     this.gradePass = new ShaderPass(new THREE.ShaderMaterial({
-      uniforms: { tDiffuse: { value: null }, time: { value: 0 }, mode: { value: 0 }, damage: { value: 0 }, flash: { value: 0 }, grade: { value: 1 }, res: { value: new THREE.Vector2(size.x, size.y) } },
+      uniforms: { tDiffuse: { value: null }, time: { value: 0 }, mode: { value: 0 }, damage: { value: 0 }, flash: { value: 0 }, grade: { value: 1 }, res: { value: new THREE.Vector2(size.x, size.y) }, look: { value: 0 } },
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
       fragmentShader: GRADE_FRAG,
     }));
@@ -244,13 +266,17 @@ export class Engine {
     const modeId = { none: 0, nvg: 1, thermal: 2, underwater: 3 }[this.postMode];
     if (this.composer && this.gradePass) {
       const u = this.gradePass.uniforms;
-      u.time.value = t; u.mode.value = modeId; u.damage.value = this.damageVignette; u.flash.value = this.flash;
+      u.time.value = t; u.mode.value = modeId; u.damage.value = this.damageVignette; u.flash.value = this.flash; u.look.value = this.look;
       if (this.bloomPass) this.bloomPass.strength = QUALITY_PRESETS[settings.data.quality].bloom * (modeId === 1 ? 0.3 : 1);
+      // count every pass of the frame, not just the last full-screen quad
+      this.renderer.info.autoReset = false;
+      this.renderer.info.reset();
       this.composer.render();
       this.stats.calls = this.renderer.info.render.calls; this.stats.tris = this.renderer.info.render.triangles;
       return;
     }
-    const needPost = this.postMode !== 'none' || this.damageVignette > 0.01 || this.flash > 0.01;
+    this.renderer.info.autoReset = true;
+    const needPost = this.postMode !== 'none' || this.damageVignette > 0.01 || this.flash > 0.01 || this.look > 0;
     if (!needPost) {
       this.renderer.setRenderTarget(null);
       this.renderer.render(this.scene, this.camera);
@@ -268,8 +294,16 @@ export class Engine {
     this.renderer.setRenderTarget(null);
     const u = this.postMat.uniforms;
     u.tDiffuse.value = this.rt.texture;
-    u.time.value = t; u.mode.value = modeId; u.damage.value = this.damageVignette; u.flash.value = this.flash;
+    u.time.value = t; u.mode.value = modeId; u.damage.value = this.damageVignette; u.flash.value = this.flash; u.look.value = this.look;
     this.renderer.render(this.postScene, this.postCam);
+  }
+
+  /** photo mode: 0 none, 1 cinematic, 2 noir, 3 vivid, 4 vintage */
+  look = 0;
+  /** render one frame right now and grab it as PNG (same task, so the drawing buffer is still intact) */
+  capture(): string {
+    this.render(performance.now() / 1000);
+    return this.renderer.domElement.toDataURL('image/png');
   }
 
   /** Compile every material up-front (async where KHR_parallel_shader_compile exists) so the first fight does not hitch. */

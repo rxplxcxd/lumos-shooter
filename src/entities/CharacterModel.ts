@@ -375,14 +375,46 @@ export class CharacterModel {
         if (this.deathVel.length() < 0.6) { this.deathVel = null; this.inner.rotation.x = THREE.MathUtils.clamp(this.inner.rotation.x, -0.3, 0.3); this.inner.rotation.z = THREE.MathUtils.clamp(this.inner.rotation.z, -0.3, 0.3); }
       }
     }
+    this.setLod(distToCam > (this.lodOn ? 30 : 36));
     const interval = distToCam < 30 ? 0 : distToCam < 80 ? 1 / 30 : distToCam < 160 ? 1 / 12 : 1 / 5;
     this.accum += dt;
     if (this.accum < interval) return;
     this.mixer.update(this.accum);
     if (distToCam < 45 && !this.own) this.procedural(this.accum);
     else if (this.spine && this.aimPitch && this.loco !== 'dead' && this.loco !== 'drive') this.spine.rotateX(-this.aimPitch * 0.6);
-    for (const g of this.gear) g.visible = distToCam < 90;
+    for (const g of this.gear) g.visible = distToCam < 70;
     this.accum = 0;
+  }
+
+  /** low-poly body bound to this character's own skeleton, shown instead of the full mesh at range */
+  private lodMesh: THREE.SkinnedMesh | null = null;
+  private fullMeshes: THREE.Mesh[] = [];
+  private lodOn = false;
+  async addLod(assets: AssetManager, lodId = 'char_mannequin_lod') {
+    const main = this.meshes.find((m) => (m as THREE.SkinnedMesh).isSkinnedMesh) as THREE.SkinnedMesh | undefined;
+    if (!main || this.own) return;
+    let src: THREE.SkinnedMesh | null = null;
+    try { (await assets.instance(lodId)).traverse((o) => { if ((o as THREE.SkinnedMesh).isSkinnedMesh && !src) src = o as THREE.SkinnedMesh; }); } catch { return; }
+    if (!src) return;
+    const s = src as THREE.SkinnedMesh;
+    if (s.skeleton.bones.length !== main.skeleton.bones.length) return;
+    const lm = new THREE.SkinnedMesh(s.geometry, main.material);
+    lm.position.copy(main.position); lm.quaternion.copy(main.quaternion); lm.scale.copy(main.scale);
+    lm.bind(main.skeleton, main.bindMatrix);
+    lm.castShadow = false; lm.receiveShadow = true;
+    lm.frustumCulled = true;
+    lm.computeBoundingSphere();
+    if (lm.boundingSphere) lm.boundingSphere.radius *= 1.8;
+    lm.visible = false;
+    main.parent!.add(lm);
+    this.lodMesh = lm;
+    this.fullMeshes = this.meshes.filter((m) => (m as THREE.SkinnedMesh).isSkinnedMesh);
+  }
+  private setLod(on: boolean) {
+    if (!this.lodMesh || on === this.lodOn) return;
+    this.lodOn = on;
+    this.lodMesh.visible = on;
+    for (const m of this.fullMeshes) m.visible = !on;
   }
 
   resetPose() { this.inner.position.set(0, 0, 0); this.inner.rotation.set(0, this.facingFix, 0); this.deathVel = null; }

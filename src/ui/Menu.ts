@@ -214,6 +214,7 @@ export class Menu {
       <div class="setting"><span>Ziel-FPS</span>${sel('targetFps', [['30', '30'], ['45', '45'], ['60', '60'], ['90', '90'], ['120', '120']], String(d.targetFps))}</div>
       <div class="setting"><span>Sichtfeld (FOV)</span>${rng('fov', 60, 110, 1, d.fov)}</div>
       <div class="setting"><span>FPS anzeigen</span>${chk('showFps', d.showFps)}</div>
+      <div class="setting"><span>Schadenszahlen</span>${chk('damageNumbers', d.damageNumbers)}</div>
       <div class="setting"><span>Maus-Empfindlichkeit</span>${rng('mouseSens', 0.2, 3, 0.05, d.mouseSens)}</div>
       <div class="setting"><span>Controller-Empfindlichkeit</span>${rng('padSens', 0.2, 3, 0.05, d.padSens)}</div>
       <div class="setting"><span>ADS-Multiplikator</span>${rng('adsSensMul', 0.2, 1.5, 0.05, d.adsSensMul)}</div>

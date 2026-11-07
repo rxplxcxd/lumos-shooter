@@ -51,14 +51,54 @@ export class AssetManager {
   load(file: string): Promise<GLTF> {
     let p = this.cache.get(file);
     if (!p) {
-      p = this.fetchGLTF(file).then((g) => { this.prepare(g.scene); return g; });
+      p = this.fetchGLTF(file).then((g) => { this.prepare(g.scene, file.startsWith('env/')); return g; });
       this.cache.set(file, p);
     }
     return p;
   }
 
   /** Shadow flags + optional low-spec material conversion (Lambert is ~3x cheaper than PBR). */
-  private prepare(root: THREE.Object3D) {
+  private triTex: THREE.Texture | null = null;
+  /** untextured (flat white) building materials from some Sketchfab exports get world-space
+   *  triplanar concrete so they read as real surfaces instead of clay renders */
+  private triplanar(mat: THREE.Material) {
+    if (!this.triTex) {
+      this.triTex = new THREE.TextureLoader().load('./assets/textures/concrete.webp');
+      this.triTex.wrapS = this.triTex.wrapT = THREE.RepeatWrapping;
+      this.triTex.colorSpace = THREE.SRGBColorSpace;
+      this.triTex.anisotropy = 4;
+    }
+    const tex = this.triTex;
+    const tint = (mat as THREE.MeshStandardMaterial).color.clone().multiplyScalar(0.92);
+    (mat as THREE.MeshStandardMaterial).color.setRGB(1, 1, 1);
+    mat.onBeforeCompile = (sh) => {
+      sh.uniforms.triTex = { value: tex };
+      sh.uniforms.triTint = { value: tint };
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vTriP; varying vec3 vTriN;')
+        .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>
+  vec4 triW = vec4(transformed, 1.0);
+  #ifdef USE_INSTANCING
+  triW = instanceMatrix * triW;
+  #endif
+  triW = modelMatrix * triW;
+  vTriP = triW.xyz;
+  vTriN = normalize(mat3(modelMatrix) * objectNormal);`);
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D triTex; uniform vec3 triTint; varying vec3 vTriP; varying vec3 vTriN;')
+        .replace('#include <map_fragment>', `#include <map_fragment>
+  {
+    vec3 bw = pow(abs(normalize(vTriN)), vec3(4.0)); bw /= (bw.x + bw.y + bw.z);
+    vec3 P = vTriP * 0.22;
+    vec3 tc = texture2D(triTex, P.zy).rgb * bw.x + texture2D(triTex, P.xz).rgb * bw.y + texture2D(triTex, P.xy).rgb * bw.z;
+    // large-scale variation (stains / weathering) so walls don't tile visibly
+    float grime = texture2D(triTex, vTriP.xz * 0.013 + vTriP.y * 0.02).g;
+    diffuseColor.rgb *= triTint * tc * (0.75 + grime * 0.5) * 1.35;
+  }`);
+    };
+    mat.customProgramCacheKey = () => 'triplanar';
+    mat.needsUpdate = true;
+  }
+
+  private prepare(root: THREE.Object3D, env = false) {
     root.traverse((o) => {
       const m = o as THREE.Mesh;
       if (!m.isMesh) return;
@@ -72,6 +112,9 @@ export class AssetManager {
           // many Sketchfab exports ship fully metallic materials that render black without an env map
           if (sm.metalness > 0.6 && !sm.metalnessMap) sm.metalness = 0.4;
           sm.envMapIntensity = 0.6;
+          // the modular city kit stores blend masks in COLOR_0 – not meant as albedo tint (red curbs)
+          if (sm.name.startsWith('MI_') && sm.vertexColors) { sm.vertexColors = false; sm.needsUpdate = true; }
+          if (env && !sm.map && sm.color.r > 0.7 && sm.color.g > 0.7 && sm.color.b > 0.7 && !sm.transparent && !this.lowSpec) this.triplanar(sm);
         }
       }
       if (this.lowSpec) {

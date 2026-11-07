@@ -682,5 +682,65 @@
   "title": "Zombie Hazmat",
   "uid": "49b3b4307f6a4d2386fdb02354158d04",
   "url": "https://sketchfab.com/3d-models/zombie-hazmat-49b3b4307f6a4d2386fdb02354158d04"
+ },
+ "g_helmet": {
+  "uid": "ad5907514a5343e3aca5ae0357b485a3",
+  "title": "MICH 2001 military helmet",
+  "author": "HaizorWill",
+  "author_username": "HaizorWill",
+  "url": "https://sketchfab.com/3d-models/mich-2001-military-helmet-ad5907514a5343e3aca5ae0357b485a3",
+  "license": "CC Attribution",
+  "license_url": "http://creativecommons.org/licenses/by/4.0/",
+  "faces": 2088,
+  "animations": 0,
+  "source": "sketchfab"
+ },
+ "g_backpack": {
+  "uid": "95a4fc7300584384b56ce3add58dbc9f",
+  "title": "Low Poly Game Ready Military Tactical Backpack",
+  "author": "DanlyVostok",
+  "author_username": "1799danly",
+  "url": "https://sketchfab.com/3d-models/low-poly-game-ready-military-tactical-backpack-95a4fc7300584384b56ce3add58dbc9f",
+  "license": "CC Attribution",
+  "license_url": "http://creativecommons.org/licenses/by/4.0/",
+  "faces": 2730,
+  "animations": 0,
+  "source": "sketchfab"
+ },
+ "g_seagull": {
+  "uid": "73aed843190a4dfda55f2b65cc0f8d63",
+  "title": "Seagulls animated",
+  "author": "vicente betoret ferrero",
+  "author_username": "deathcow",
+  "url": "https://sketchfab.com/3d-models/seagulls-animated-73aed843190a4dfda55f2b65cc0f8d63",
+  "license": "CC Attribution",
+  "license_url": "http://creativecommons.org/licenses/by/4.0/",
+  "faces": 808,
+  "animations": 1,
+  "source": "sketchfab"
+ },
+ "g_raven": {
+  "uid": "60155d61e6904e87b899a96c4c106792",
+  "title": "Raven",
+  "author": "David Clowes",
+  "author_username": "xdavidclowesx",
+  "url": "https://sketchfab.com/3d-models/raven-60155d61e6904e87b899a96c4c106792",
+  "license": "CC Attribution",
+  "license_url": "http://creativecommons.org/licenses/by/4.0/",
+  "faces": 2608,
+  "animations": 1,
+  "source": "sketchfab"
+ },
+ "p_cityprops": {
+  "uid": "32b8b82bb1e9489c993799c91967a916",
+  "title": "City Props Collection volume 1",
+  "author": "TampaJoey",
+  "author_username": "TampaJoey",
+  "url": "https://sketchfab.com/3d-models/city-props-collection-volume-1-32b8b82bb1e9489c993799c91967a916",
+  "license": "Free Standard",
+  "license_url": "https://sketchfab.com/licenses",
+  "faces": 70831,
+  "animations": 0,
+  "source": "sketchfab"
  }
 }
