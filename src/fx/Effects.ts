@@ -21,9 +21,15 @@ class Points {
     this.geo.setAttribute('seed', new THREE.BufferAttribute(this.seed, 1));
     const mat = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
-      uniforms: { scale: { value: innerHeight / 2 } },
+      uniforms: { scale: { value: innerHeight / 2 }, maxPx: { value: additive ? innerHeight * 0.09 : innerHeight * 0.6 }, nearFade: { value: additive ? 1.2 : 0.5 } },
       vertexShader: `attribute float size; attribute vec4 color; attribute float seed; varying vec4 vC; varying float vS; uniform float scale;
-        void main(){ vC = color; vS = seed; vec4 mv = modelViewMatrix * vec4(position,1.0); gl_PointSize = size * scale / max(-mv.z, 0.1); gl_Position = projectionMatrix * mv; }`,
+        uniform float maxPx; uniform float nearFade;
+        void main(){ vC = color; vS = seed; vec4 mv = modelViewMatrix * vec4(position,1.0);
+          float z = max(-mv.z, 0.1);
+          gl_PointSize = min(size * scale / z, maxPx);
+          // particles right in front of the lens fade out instead of becoming screen-sized blobs
+          vC.a *= smoothstep(nearFade * 0.3, nearFade, z);
+          gl_Position = projectionMatrix * mv; }`,
       fragmentShader: additive
         ? `varying vec4 vC; varying float vS; void main(){ vec2 d = gl_PointCoord - 0.5; float r = length(d); if (r > 0.5) discard; float core = smoothstep(0.5, 0.0, r); gl_FragColor = vec4(vC.rgb * (core * core * 2.0 + core), vC.a * core); }`
         : `varying vec4 vC; varying float vS;
@@ -44,7 +50,7 @@ class Points {
     this.points.frustumCulled = false;
     this.points.renderOrder = additive ? 6 : 5;
     scene.add(this.points);
-    addEventListener('resize', () => { mat.uniforms.scale.value = innerHeight / 2; });
+    addEventListener('resize', () => { mat.uniforms.scale.value = innerHeight / 2; mat.uniforms.maxPx.value = additive ? innerHeight * 0.09 : innerHeight * 0.6; });
   }
   emit(p: THREE.Vector3, v: THREE.Vector3, c: THREE.Color, alpha: number, size: number, life: number, gravity = 0, grow = 0, drag = 0.98) {
     const i = this.next; this.next = (this.next + 1) % this.max;

@@ -138,6 +138,7 @@ export const AUDIO = {
     'zombie_swipe', 'zombie_death', 'zombie_fall', 'bone_crack', 'splat', 'splat_heavy', 'engine_idle', 'engine_low', 'engine_mid', 'engine_high',
     'engine_start', 'horn', 'skid', 'brake', 'crash', 'gear_shift', 'turbo', 'car_door', 'coin', 'cash', 'land_heavy', 'wind_loop',
     'ui_cursor', 'ui_select', 'ui_confirm', 'ui_cancel', 'ui_error', 'ui_popup_open', 'ui_popup_close', 'ui_swipe',
+    'thunder_close', 'thunder_far', 'rain_drip', 'splash', 'ice_crack', 'ember_pop', 'wind_gust', 'owl', 'birdsong', 'church_bell', 'waves',
   ],
   steps: ['grass', 'dirt', 'stone', 'wood', 'metal', 'sand', 'water', 'gravel', 'snow'],
   music: ['menu', 'lobby', 'drop', 'zombies', 'tension', 'victory'],

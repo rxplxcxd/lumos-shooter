@@ -300,7 +300,7 @@ const EURO_POOL = ['DutchRow', 'BrickHouse_A', 'NarrowHouse', 'BrickHouse_B', 'B
  */
 async function oldTownBlock(mb: MapBuilder, bx: number, bz: number, lot: number, h: number, R: Rng, g: THREE.Group, props: THREE.Group, info: CityInfo, townHall: boolean, detail: number) {
   const sizes = new Map<string, THREE.Vector3>();
-  for (const p of new Set([...EURO_POOL, 'TownHall'])) sizes.set(p, await mb.sizeOf(`kit:euro_a:${p}`));
+  for (const p of new Set([...EURO_POOL, 'TownHall', 'CornerShop'])) sizes.set(p, await mb.sizeOf(`kit:euro_a:${p}`));
   const dims = (p: string) => { const sz = sizes.get(p)!; return p === 'TownHall' ? { w: sz.z, d: sz.x } : { w: sz.x, d: sz.z }; };
   const depthMax = 16.5;
   // houses whose side walls are textured brick can close a row at a street corner

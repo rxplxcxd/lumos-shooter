@@ -97,6 +97,7 @@ export abstract class SoldierMode extends Mode {
     for (const b of this.bots) if (b.s.alive && b.s !== victim) b.hear(victim.pos, 90);
     if (victim === this.w.player?.soldier) {
       this.w.player.spectateTarget = info.attacker ?? null;
+      this.w.killcam?.schedule(info.attacker ?? null, victim, this.w.time);
     }
   }
 

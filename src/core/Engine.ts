@@ -5,17 +5,44 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
+import { Pass } from 'three/examples/jsm/postprocessing/Pass.js';
+import { AtmospherePass, type AtmoState } from '../fx/AtmospherePass';
 import { settings, QUALITY_PRESETS } from './Settings';
 
 export type PostMode = 'none' | 'nvg' | 'thermal' | 'underwater';
 
 /** final grading / effect pass – runs on the linear HDR buffer before tone mapping */
 const GRADE_FRAG = /* glsl */ `
-uniform sampler2D tDiffuse; uniform float time; uniform int mode; uniform float damage; uniform float flash; uniform float grade; uniform vec2 res; uniform int look;
+uniform sampler2D tDiffuse; uniform float time; uniform int mode; uniform float damage; uniform float flash; uniform float grade; uniform vec2 res; uniform int look; uniform float rainLens;
 varying vec2 vUv;
 float rand(vec2 c){ return fract(sin(dot(c, vec2(12.9898,78.233))) * 43758.5453); }
+// rain on the lens / visor: drops that fade in, some slide down leaving a trail, all refract the image
+vec2 lensDrops(vec2 uv, float t, float amt){
+  vec2 off = vec2(0.0);
+  float aspect = res.x / max(res.y, 1.0);
+  for (int l = 0; l < 3; l++) {
+    float sc = l == 0 ? 5.0 : l == 1 ? 9.0 : 16.0;
+    vec2 st = vec2(uv.x * aspect, uv.y) * sc + float(l) * 3.7;
+    vec2 id = floor(st); vec2 f = fract(st) - 0.5;
+    float r = rand(id + float(l) * 11.0);
+    if (r > amt * 0.85 + 0.08) continue;
+    float spd = 0.05 + rand(id + 2.0) * 0.12;
+    float life = fract(t * spd + r * 13.0);
+    float slide = step(0.55, rand(id + 5.0)) * (l == 0 ? 1.0 : 0.4);
+    vec2 c = vec2((rand(id + 3.1) - 0.5) * 0.55, 0.3 - life * 0.75 * slide);
+    float rad = (0.1 + r * 0.12) * (l == 2 ? 0.7 : 1.0);
+    vec2 dd = f - c;
+    dd.y *= 1.0 + slide * 0.6;
+    float m = smoothstep(rad, rad * 0.45, length(dd)) * smoothstep(0.0, 0.08, life) * (1.0 - smoothstep(0.8, 1.0, life));
+    // trail left behind a sliding drop
+    float trail = slide * smoothstep(0.05, 0.0, abs(f.x - c.x)) * step(c.y, f.y) * smoothstep(0.45, 0.0, f.y - c.y) * 0.35;
+    off += (dd * m * 0.9 + vec2(0.0, trail * 0.02)) / sc;
+  }
+  return off;
+}
 void main(){
   vec2 uv = vUv;
+  if (rainLens > 0.001) uv += lensDrops(vUv, time, rainLens);
   if (mode == 3) { uv.x += sin(uv.y * 30.0 + time * 2.0) * 0.003; uv.y += cos(uv.x * 25.0 + time * 1.7) * 0.003; }
   vec2 dc = uv - 0.5;
   float d = length(dc);
@@ -56,6 +83,12 @@ void main(){
     float L = dot(c, vec3(0.2126, 0.7152, 0.0722));
     c = mix(vec3(L), c, 1.38);
     c = 0.18 * pow(max(c, vec3(0.0)) / 0.18, vec3(1.08));
+  } else if (look == 5) { // killcam replay: cool, partly desaturated, grainy, heavy vignette
+    float L = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    c = mix(vec3(L), c, 0.55) * vec3(0.92, 0.98, 1.08);
+    c = 0.18 * pow(max(c, vec3(0.0)) / 0.18, vec3(1.08));
+    c += (rand(uv * res + time) - 0.5) * 0.06;
+    c *= mix(1.0, smoothstep(0.85, 0.2, d), 0.7);
   } else if (look == 4) { // vintage: warm, faded blacks, soft
     float L = dot(c, vec3(0.2126, 0.7152, 0.0722));
     c = mix(vec3(L), c, 0.7) * vec3(1.1, 1.0, 0.82) + vec3(0.025, 0.02, 0.01);
@@ -102,6 +135,12 @@ export class Engine {
   private composer: EffectComposer | null = null;
   private gradePass: ShaderPass | null = null;
   private bloomPass: UnrealBloomPass | null = null;
+  private atmoPass: AtmospherePass | null = null;
+  /** written every frame by the sky / weather systems, read by the atmosphere pass */
+  readonly atmo: AtmoState = { sunDir: new THREE.Vector3(0, 1, 0), sunColor: new THREE.Color(1, 1, 1), fogColor: new THREE.Color(0.7, 0.8, 0.9), fogDensity: 0, fogHeight: 0, fogFalloff: 0.05, wet: 0, rain: 0, godrays: 0, lightning: 0 };
+  /** 0..1 raindrops on the lens / visor */
+  rainLens = 0;
+  get hasAtmosphere() { return !!this.atmoPass; }
   private updateFns: ((dt: number, t: number) => void)[] = [];
   private fixedFns: ((dt: number) => void)[] = [];
   private acc = 0;
@@ -125,7 +164,7 @@ export class Engine {
     canvasParent.appendChild(this.renderer.domElement);
     this.camera = new THREE.PerspectiveCamera(settings.data.fov, innerWidth / innerHeight, 0.05, q.far);
     this.postMat = new THREE.ShaderMaterial({
-      uniforms: { tDiffuse: { value: null }, time: { value: 0 }, mode: { value: 0 }, damage: { value: 0 }, flash: { value: 0 }, grade: { value: 0 }, res: { value: new THREE.Vector2(1, 1) }, look: { value: 0 } },
+      uniforms: { tDiffuse: { value: null }, time: { value: 0 }, mode: { value: 0 }, damage: { value: 0 }, flash: { value: 0 }, grade: { value: 0 }, res: { value: new THREE.Vector2(1, 1) }, look: { value: 0 }, rainLens: { value: 0 } },
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
       fragmentShader: POST_FRAG,
       depthTest: false, depthWrite: false,
@@ -149,18 +188,27 @@ export class Engine {
   private setupComposer(on: boolean) {
     const q = QUALITY_PRESETS[settings.data.quality];
     this.composer?.dispose();
-    this.composer = null; this.gradePass = null; this.bloomPass = null;
+    this.composer = null; this.gradePass = null; this.bloomPass = null; this.atmoPass?.dispose(); this.atmoPass = null;
     this.composerEnabled = on;
     if (!on) return;
     const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
     const rt = new THREE.WebGLRenderTarget(Math.max(1, size.x), Math.max(1, size.y), { type: THREE.HalfFloatType, samples: q.msaa });
+    if (q.atmo) rt.depthTexture = new THREE.DepthTexture(Math.max(1, size.x), Math.max(1, size.y));
     const c = new EffectComposer(this.renderer, rt);
     c.addPass(new RenderPass(this.scene, this.camera));
+    // remember which buffer holds the scene depth (GTAO swaps buffers before the atmosphere pass)
+    const atmo = q.atmo ? new AtmospherePass(this.camera, this.atmo, { ssr: q.ssr, godrays: q.godrays }) : null;
+    if (atmo) {
+      const grab = new Pass(); grab.needsSwap = false;
+      grab.render = (_r: THREE.WebGLRenderer, _w: THREE.WebGLRenderTarget, read: THREE.WebGLRenderTarget) => { atmo.depth = read.depthTexture; };
+      c.addPass(grab);
+    }
     if (q.ao) {
       const ao = new GTAOPass(this.scene, this.camera, size.x, size.y);
       ao.blendIntensity = 0.75;
       c.addPass(ao);
     }
+    if (atmo) { c.addPass(atmo); this.atmoPass = atmo; }
     const ov = new RenderPass(this.overlay, this.overlayCam);
     ov.clear = false; ov.clearDepth = true;
     c.addPass(ov);
@@ -169,7 +217,7 @@ export class Engine {
       c.addPass(this.bloomPass);
     }
     this.gradePass = new ShaderPass(new THREE.ShaderMaterial({
-      uniforms: { tDiffuse: { value: null }, time: { value: 0 }, mode: { value: 0 }, damage: { value: 0 }, flash: { value: 0 }, grade: { value: 1 }, res: { value: new THREE.Vector2(size.x, size.y) }, look: { value: 0 } },
+      uniforms: { tDiffuse: { value: null }, time: { value: 0 }, mode: { value: 0 }, damage: { value: 0 }, flash: { value: 0 }, grade: { value: 1 }, res: { value: new THREE.Vector2(size.x, size.y) }, look: { value: 0 }, rainLens: { value: 0 } },
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
       fragmentShader: GRADE_FRAG,
     }));
@@ -266,7 +314,7 @@ export class Engine {
     const modeId = { none: 0, nvg: 1, thermal: 2, underwater: 3 }[this.postMode];
     if (this.composer && this.gradePass) {
       const u = this.gradePass.uniforms;
-      u.time.value = t; u.mode.value = modeId; u.damage.value = this.damageVignette; u.flash.value = this.flash; u.look.value = this.look;
+      u.time.value = t; u.mode.value = modeId; u.damage.value = this.damageVignette; u.flash.value = this.flash; u.look.value = this.look; u.rainLens.value = this.rainLens;
       if (this.bloomPass) this.bloomPass.strength = QUALITY_PRESETS[settings.data.quality].bloom * (modeId === 1 ? 0.3 : 1);
       // count every pass of the frame, not just the last full-screen quad
       this.renderer.info.autoReset = false;
@@ -276,7 +324,7 @@ export class Engine {
       return;
     }
     this.renderer.info.autoReset = true;
-    const needPost = this.postMode !== 'none' || this.damageVignette > 0.01 || this.flash > 0.01 || this.look > 0;
+    const needPost = this.postMode !== 'none' || this.damageVignette > 0.01 || this.flash > 0.01 || this.look > 0 || this.rainLens > 0.01;
     if (!needPost) {
       this.renderer.setRenderTarget(null);
       this.renderer.render(this.scene, this.camera);
@@ -294,11 +342,11 @@ export class Engine {
     this.renderer.setRenderTarget(null);
     const u = this.postMat.uniforms;
     u.tDiffuse.value = this.rt.texture;
-    u.time.value = t; u.mode.value = modeId; u.damage.value = this.damageVignette; u.flash.value = this.flash; u.look.value = this.look;
+    u.time.value = t; u.mode.value = modeId; u.damage.value = this.damageVignette; u.flash.value = this.flash; u.look.value = this.look; u.rainLens.value = this.rainLens;
     this.renderer.render(this.postScene, this.postCam);
   }
 
-  /** photo mode: 0 none, 1 cinematic, 2 noir, 3 vivid, 4 vintage */
+  /** photo mode: 0 none, 1 cinematic, 2 noir, 3 vivid, 4 vintage, 5 replay (killcam) */
   look = 0;
   /** render one frame right now and grab it as PNG (same task, so the drawing buffer is still intact) */
   capture(): string {

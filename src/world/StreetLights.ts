@@ -52,7 +52,7 @@ export class StreetLights {
         void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0);
           float lit = clamp(on * 1.6 - fract(seed) * 0.6, 0.0, 1.0);
           if (seed >= 1.0) lit *= step(0.35, fract(sin(floor(time * 9.0) * 12.9898 + seed * 78.233) * 43758.5453));
-          vA = lit; gl_PointSize = scale * 1.6 / max(1.0, -mv.z); gl_Position = projectionMatrix * mv; }`,
+          float dz = -mv.z; vA = lit * smoothstep(2.0, 7.0, dz); gl_PointSize = min(scale * 1.6 / max(1.0, dz), scale * 0.09); gl_Position = projectionMatrix * mv; }`,
       fragmentShader: `varying float vA; void main(){ vec2 d = gl_PointCoord - 0.5; float r = length(d) * 2.0; if (r > 1.0 || vA <= 0.0) discard;
           float core = exp(-r * r * 9.0) * 1.6 + exp(-r * r * 2.5) * 0.35; gl_FragColor = vec4(vec3(1.0, 0.82, 0.55) * core * vA, 1.0); }`,
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
@@ -88,13 +88,14 @@ export class StreetLights {
     const t = sky.time;
     const dusk = THREE.MathUtils.smoothstep(t, 18.2, 19.3), dawn = 1 - THREE.MathUtils.smoothstep(t, 5.4, 6.6);
     const dark = Math.max(dusk, dawn);
-    const gloom = sky.weather === 'fog' || sky.weather === 'rain' ? 0.75 : sky.weather === 'overcast' ? 0.25 : 0;
+    const wp = sky.wx?.p;
+    const gloom = wp ? THREE.MathUtils.clamp(wp.fog * 0.9 + wp.rain * 0.8 + wp.dark * 0.6 - 0.2, 0, 1) : sky.weather === 'fog' || sky.weather === 'rain' ? 0.75 : sky.weather === 'overcast' ? 0.25 : 0;
     return Math.max(dark, gloom);
   }
 
   update(dt: number) {
     // rain makes the streets wet: glossy, darker asphalt that mirrors the sky and the lamps
-    const wantWet = this.w.sky.weather === 'rain' ? 1 : 0;
+    const wantWet = this.w.sky.wx ? this.w.sky.wx.wet : this.w.sky.weather === 'rain' ? 1 : 0;
     if (this.wetMats.length && Math.abs(wantWet - this.wet) > 0.001) {
       this.wet += (wantWet - this.wet) * Math.min(1, dt * 0.15);
       for (const x of this.wetMats) {

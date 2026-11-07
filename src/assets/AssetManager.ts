@@ -5,6 +5,7 @@ import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { MODELS, KITS, CHARACTER_ANIMS, type ModelDef, type KitId } from './manifest';
+import { settings } from '../core/Settings';
 
 /**
  * AssetManager
@@ -14,6 +15,8 @@ import { MODELS, KITS, CHARACTER_ANIMS, type ModelDef, type KitId } from './mani
  *  - Normalises third-party models (scale / yaw / pivot) using the manifest
  *  - Hands out cheap clones (shared geometry & materials, SkeletonUtils for skinned meshes)
  */
+const settingsQuality = () => settings.data.quality;
+
 export class AssetManager {
   private loader = new GLTFLoader();
   private cache = new Map<string, Promise<GLTF>>();
@@ -51,7 +54,7 @@ export class AssetManager {
   load(file: string): Promise<GLTF> {
     let p = this.cache.get(file);
     if (!p) {
-      p = this.fetchGLTF(file).then((g) => { this.prepare(g.scene, file.startsWith('env/')); return g; });
+      p = this.fetchGLTF(file).then((g) => { this.prepare(g.scene, file.startsWith('env/'), file.startsWith('vehicles/')); return g; });
       this.cache.set(file, p);
     }
     return p;
@@ -60,6 +63,7 @@ export class AssetManager {
   /** Shadow flags + optional low-spec material conversion (Lambert is ~3x cheaper than PBR). */
   private triTex: THREE.Texture | null = null;
   private lambertCache = new Map<string, THREE.MeshLambertMaterial>();
+  private paintCache = new Map<string, THREE.MeshPhysicalMaterial>();
   /** untextured (flat white) building materials from some Sketchfab exports get world-space
    *  triplanar concrete so they read as real surfaces instead of clay renders */
   private triplanar(mat: THREE.Material) {
@@ -99,7 +103,21 @@ export class AssetManager {
     mat.needsUpdate = true;
   }
 
-  private prepare(root: THREE.Object3D, env = false) {
+  /** physically plausible defaults per material class (exports rarely ship good roughness / metalness) */
+  private pbr(sm: THREE.MeshStandardMaterial, vehicle: boolean) {
+    const n = sm.name.toLowerCase();
+    const hasRM = !!(sm.roughnessMap || sm.metalnessMap);
+    if (/glass|window|windshield|windscreen|lens/.test(n)) { sm.roughness = 0.04; sm.metalness = 0.1; sm.envMapIntensity = 1.25; return; }
+    if (hasRM) return;
+    if (/chrome|steel|iron|metal|alu|rim|pipe|rail/.test(n)) { sm.metalness = Math.max(sm.metalness, 0.72); sm.roughness = Math.min(sm.roughness, 0.36); sm.envMapIntensity = 0.95; return; }
+    if (/tire|tyre|rubber|wheel/.test(n)) { sm.roughness = 0.94; sm.metalness = 0; return; }
+    if (/asphalt|road|concrete|stone|brick|plaster|cladding|roof|wall|dirt|ground/.test(n)) { sm.roughness = Math.max(sm.roughness, 0.84); sm.metalness = 0; return; }
+    if (/wood|plank|bark|leaf|leaves|grass|cloth|fabric|tarp/.test(n)) { sm.roughness = Math.max(sm.roughness, 0.88); sm.metalness = 0; return; }
+    if (vehicle) { sm.roughness = Math.min(sm.roughness, 0.42); sm.metalness = Math.min(Math.max(sm.metalness, 0.18), 0.4); sm.envMapIntensity = 0.85; }
+  }
+
+  private prepare(root: THREE.Object3D, env = false, vehicle = false) {
+    const physical = !this.lowSpec && (settingsQuality() === 'high' || settingsQuality() === 'ultra');
     root.traverse((o) => {
       const m = o as THREE.Mesh;
       if (!m.isMesh) return;
@@ -116,7 +134,25 @@ export class AssetManager {
           // the modular city kit stores blend masks in COLOR_0 – not meant as albedo tint (red curbs)
           if (sm.name.startsWith('MI_') && sm.vertexColors) { sm.vertexColors = false; sm.needsUpdate = true; }
           if (env && !sm.map && sm.color.r > 0.7 && sm.color.g > 0.7 && sm.color.b > 0.7 && !sm.transparent && !this.lowSpec) this.triplanar(sm);
+          if (!this.lowSpec) this.pbr(sm, vehicle);
         }
+      }
+      if (vehicle && physical) {
+        const up = mats.map((mat) => {
+          const sm = mat as THREE.MeshStandardMaterial;
+          if (!sm.isMeshStandardMaterial || (sm as THREE.MeshPhysicalMaterial).isMeshPhysicalMaterial || /glass|window|tire|tyre|rubber|light|lamp/i.test(sm.name)) return mat;
+          let p = this.paintCache.get(sm.uuid);
+          if (!p) {
+            p = new THREE.MeshPhysicalMaterial();
+            THREE.MeshStandardMaterial.prototype.copy.call(p, sm);
+            p.defines = { STANDARD: '', PHYSICAL: '' }; // the standard copy() drops the physical define
+            p.clearcoat = 0.85; p.clearcoatRoughness = 0.12; p.roughness = Math.min(sm.roughness, 0.45);
+            p.name = sm.name;
+            this.paintCache.set(sm.uuid, p);
+          }
+          return p;
+        });
+        m.material = Array.isArray(m.material) ? up : up[0];
       }
       if (this.lowSpec) {
         const conv = mats.map((mat) => {

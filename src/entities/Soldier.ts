@@ -121,7 +121,9 @@ export class Soldier implements Actor {
     this.w = w; this.name = name; this.team = team; this.tint = tint;
   }
 
+  modelId = 'char_mannequin';
   async init(modelId = 'char_mannequin', gear = QUALITY_PRESETS[settings.data.quality].gear) {
+    this.modelId = modelId;
     await this.model.init(this.w.assets, modelId, this.tint);
     this.model.groundFn = (x, z) => this.w.terrain.getHeight(x, z);
     if (gear) await this.model.addGear(this.w.assets, this.team === 0 ? 0x4b5a3a : [0x5a4a36, 0x3e4a52, 0x4a3a3a, 0x52523a][this.team % 4]);

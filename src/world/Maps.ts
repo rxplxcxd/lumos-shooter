@@ -207,9 +207,10 @@ export async function buildBRMap(w: GameWorld, seed: number, progress: Progress)
   const terrain = new Terrain({ size: 1600, segments: segFor(), seed, island: true, baseHeight: 10, hills: 22, mountains: 75, flats, roads, lakes: [{ x: -160, z: -150, r: 85, depth: 8 }] });
   const wr = new Rng(seed * 7 + 3);
   const lowQ0 = QUALITY_PRESETS[settings.data.quality].lowSpecMaterials;
-  const weather = lowQ0 ? 'clear' : wr.pick(['clear', 'clear', 'clear', 'overcast', 'overcast', 'rain', 'fog'] as const);
+  const weather = lowQ0 ? 'clear' : wr.pick(['clear', 'clear', 'cloudy', 'cloudy', 'overcast', 'drizzle', 'rain', 'fog', 'storm'] as const);
   // late drops fly into dusk: the city lights come on during the match
-  await w.init(terrain, { time: lowQ0 ? 13 : 7 + wr.next() * 11, weather, timeSpeed: lowQ0 ? 0 : 0.004 });
+  // dynamic weather follows a seeded forecast (identical for everybody in an online match)
+  await w.init(terrain, { time: lowQ0 ? 13 : 7 + wr.next() * 11, weather, timeSpeed: lowQ0 ? 0 : 0.004, dynamicWeather: !lowQ0, seed });
   const mb = new MapBuilder(w, seed);
   const R = mb.rng;
   const lowQ = lowQ0;
@@ -372,7 +373,7 @@ export async function buildArena(w: GameWorld, seed: number, progress: Progress,
   const flats: Flat[] = [{ x: 0, z: 0, r: 120, h: 5, blend: 40, color: [0.45, 0.44, 0.4] }];
   const roads: Road[] = [{ pts: [[0, -110], [0, 110]], width: 10 }, { pts: [[-60, 0], [60, 0]], width: 8 }];
   const terrain = new Terrain({ size: 420, segments: 96, seed, island: false, baseHeight: 6, hills: 10, mountains: 30, flats, roads });
-  await w.init(terrain, { time: night ? 23 : 16.5, weather: night ? 'clear' : 'overcast' });
+  await w.init(terrain, { time: night ? 23 : 16.5, weather: night ? 'clear' : 'cloudy', seed });
   const mb = new MapBuilder(w, seed);
   const R = mb.rng;
   progress(0.3, 'Crossroads');
@@ -424,7 +425,7 @@ export interface ZDoor { id: string; cost: number; x: number; z: number; horizon
 export async function buildZombieOutpost(w: GameWorld, seed: number, progress: Progress): Promise<MapInfo> {
   const flats: Flat[] = [{ x: 0, z: 0, r: 70, h: 3, blend: 30, color: [0.4, 0.38, 0.34] }];
   const terrain = new Terrain({ size: 360, segments: 80, seed, island: false, baseHeight: 4, hills: 8, mountains: 20, flats });
-  await w.init(terrain, { time: 21.5, weather: 'fog' });
+  await w.init(terrain, { time: 21.5, weather: 'fog', seed });
   const mb = new MapBuilder(w, seed);
   const y = 2.95;
   const rooms: ZRoom[] = [

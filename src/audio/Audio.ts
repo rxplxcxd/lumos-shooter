@@ -142,6 +142,48 @@ export class AudioSys {
     };
   }
 
+  /**
+   * Procedural weather ambience bed: looping noise through filters – a low "wash" and a bright
+   * "patter" layer for rain, a resonant hail layer and a slowly wobbling wind band. Gains follow
+   * the weather intensities smoothly (sampled drips / thunder are layered on top by the weather).
+   */
+  weatherBed(): { set: (rain: number, hail: number, wind: number) => void; stop: () => void } | null {
+    const ctx = this.ctx;
+    const len = Math.floor(4 * ctx.sampleRate);
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    // pink-ish noise (Paul Kellet's filter) – more natural than white noise for rain
+    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+    for (let i = 0; i < len; i++) {
+      const w = Math.random() * 2 - 1;
+      b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759; b2 = 0.969 * b2 + w * 0.153852;
+      b3 = 0.8665 * b3 + w * 0.3104856; b4 = 0.55 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.016898;
+      d[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11; b6 = w * 0.115926;
+    }
+    const layer = (type: BiquadFilterType, freq: number, q: number) => {
+      const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+      const f = ctx.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
+      const g = ctx.createGain(); g.gain.value = 0;
+      src.connect(f).connect(g).connect(this.sfx);
+      src.start(0, Math.random() * 3.5);
+      return { src, f, g };
+    };
+    const wash = layer('lowpass', 1500, 0.4), patter = layer('bandpass', 4200, 0.8), hail = layer('bandpass', 2700, 2.2), wind = layer('bandpass', 380, 0.7);
+    const t0 = ctx.currentTime;
+    return {
+      set: (rain, hl, wd) => {
+        const t = ctx.currentTime;
+        wash.g.gain.setTargetAtTime(Math.pow(rain, 1.2) * 0.55, t, 0.6);
+        patter.g.gain.setTargetAtTime(rain * (0.18 + Math.random() * 0.06), t, 0.25);
+        wash.f.frequency.setTargetAtTime(900 + rain * 1600, t, 0.8);
+        hail.g.gain.setTargetAtTime(hl * (0.3 + Math.random() * 0.12), t, 0.15);
+        wind.g.gain.setTargetAtTime(Math.max(0, wd - 0.35) * 0.2, t, 0.8);
+        wind.f.frequency.setTargetAtTime(260 + 220 * (0.5 + 0.5 * Math.sin((t - t0) * 0.35)) + wd * 120, t, 1.2);
+      },
+      stop: () => { for (const l of [wash, patter, hail, wind]) { try { l.src.stop(); } catch { /* */ } l.src.disconnect(); } },
+    };
+  }
+
   async playMusic(name: string, fade = 1.5) {
     if (this.musicName === name) return;
     this.musicName = name;

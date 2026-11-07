@@ -144,6 +144,7 @@ export class Multiplayer extends SoldierMode {
     // respawns
     for (let i = this.respawnQ.length - 1; i >= 0; i--) {
       const r = this.respawnQ[i];
+      if (r.s.isPlayer && w.killcam?.busy) { r.t = Math.max(0.6, r.t - dt); continue; } // respawn right after the killcam
       r.t -= dt;
       if (r.t <= 0) {
         this.respawnQ.splice(i, 1);

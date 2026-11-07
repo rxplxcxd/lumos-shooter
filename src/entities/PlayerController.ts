@@ -45,6 +45,7 @@ export class PlayerController {
   private holdT = 0;
   inPlane = false;
   private flashlight: THREE.SpotLight;
+  private flashT = 0; private flashNear = 1; private flashK = 1;
   private parachuteMesh: THREE.Object3D | null = null;
   lockedControls = false;
 
@@ -61,7 +62,7 @@ export class PlayerController {
     this.arc = new THREE.Line(g, new THREE.LineDashedMaterial({ color: 0xffe08a, dashSize: 0.3, gapSize: 0.18, transparent: true, opacity: 0.9 }));
     this.arc.frustumCulled = false; this.arc.visible = false;
     w.scene.add(this.arc);
-    this.flashlight = new THREE.SpotLight(0xfff2d0, 0, 45, 0.45, 0.5, 1.2);
+    this.flashlight = new THREE.SpotLight(0xfff2d0, 0, 40, 0.42, 0.72, 2);
     w.scene.add(this.flashlight, this.flashlight.target);
     w.assets.instance('w_grenade').then((m) => { this.grenadeMesh = m; });
     w.assets.instance('item_parachute').then((m) => { this.parachuteMesh = m; m.visible = false; w.scene.add(m); });
@@ -179,7 +180,17 @@ export class PlayerController {
     w.setThermal(thermal, dt);
     // weapon light at night
     const light = s.weapon.attachments.includes('flashlight') || w.sky.isNight;
-    this.flashlight.intensity = light && !this.thirdPerson ? 60 : 0;
+    // a real torch: inverse-square falloff, eased off on surfaces right in front of the lens
+    if (light && !this.thirdPerson) {
+      this.flashT -= dt;
+      if (this.flashT <= 0) {
+        this.flashT = 0.1;
+        const hit = w.physics.raycast(w.engine.camera.position, this.forward(), 6, s.collider);
+        this.flashNear = hit ? THREE.MathUtils.clamp(hit.dist / 2.5, 0.12, 1) : 1;
+      }
+      this.flashK += (this.flashNear - this.flashK) * Math.min(1, dt * 8);
+      this.flashlight.intensity = 26 * this.flashK * this.flashK;
+    } else this.flashlight.intensity = 0;
     this.updateCamera(dt);
     this.updateViewModel(dt);
     // parachute visual
@@ -455,8 +466,44 @@ export class PlayerController {
     this.flashlight.target.position.copy(cam.position).add(this.forward().multiplyScalar(10));
   }
 
+  private kcFired = 0;
+  /** killcam: the killer's weapon as first-person view-model (camera itself is driven by the replay) */
+  private killcamView(dt: number) {
+    const kc = this.w.killcam, wp = kc.view.weapon;
+    this.arc.visible = false;
+    if (!wp) { this.vm.visible = false; return; }
+    this.vm.visible = true;
+    this.ensureViewModel(wp);
+    if (!this.vmGun) return;
+    const calib = this.vmGun.userData.calib as SightCalib;
+    const len = wp.def.length;
+    const ads = Math.min(kc.view.ads, calib.kind === 'iron' || calib.kind === 'reflex' ? 1 : 0.82);
+    const target = new THREE.Vector3(0.15 + len * 0.05, -0.15 - len * 0.03, -0.3 - len * 0.42).lerp(calib.pos, ads);
+    const oc = this.w.engine.overlayCam;
+    oc.fov = THREE.MathUtils.lerp(58, 42, ads); oc.updateProjectionMatrix();
+    // recoil kick + muzzle flash on every replayed shot of the killer
+    if (kc.view.fired > 0.95 && this.kcFired <= 0.95) {
+      this.vmImpulse(new THREE.Vector3((Math.random() - 0.5) * 0.04, 0.05, 0.22), new THREE.Vector3(0.9 + wp.stats.recoilV * 0.3, (Math.random() - 0.5) * 0.3, 0));
+      const mw = this.muzzleWorld();
+      const dir = this.w.engine.camera.getWorldDirection(new THREE.Vector3());
+      this.w.replay.orig.muzzle?.(mw, dir, wp.def.cls === 'sniper' || wp.def.cls === 'shotgun', !!wp.stats.silenced);
+    }
+    this.kcFired = kc.view.fired;
+    const k = 260, c = 26;
+    this.vmPosV.addScaledVector(this.vmPos, -k * dt).multiplyScalar(Math.max(0, 1 - c * dt));
+    this.vmPos.addScaledVector(this.vmPosV, dt);
+    this.vmRotV.addScaledVector(this.vmRot, -k * 0.8 * dt).multiplyScalar(Math.max(0, 1 - c * 0.9 * dt));
+    this.vmRot.addScaledVector(this.vmRotV, dt);
+    const g = this.vmGun;
+    g.visible = true;
+    g.position.lerp(target, Math.min(1, dt * 14)).add(this.vmPos.clone().multiplyScalar(0.12));
+    g.rotation.set(calib.tilt * ads + this.vmRot.x * 0.12, this.vmRot.y * 0.12, this.vmRot.z * 0.12);
+    const optic = g.getObjectByName('att_optic'); if (optic) optic.visible = ads < 0.8;
+  }
+
   private updateDeathCam(dt: number) {
     const s = this.soldier, w = this.w, cam = w.engine.camera;
+    if (w.killcam?.active) { w.engine.setPost('none'); this.killcamView(dt); return; }
     this.vm.visible = false;
     this.arc.visible = false;
     s.model.setVisible(true);

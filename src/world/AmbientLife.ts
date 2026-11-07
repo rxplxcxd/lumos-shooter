@@ -73,7 +73,7 @@ export class AmbientLife {
       fx.emit(p, new THREE.Vector3(rnd(0.8) + 0.6, -0.6, rnd(0.8)), this.c, 0.9, 0.09, 7, 0.05, 0);
     }
     // sun-lit dust motes
-    if (!night && sky.weather === 'clear' && Math.random() < 0.5) {
+    if (!night && (sky.wx ? sky.wx.p.cover < 0.5 && sky.wx.p.rain < 0.05 : sky.weather === 'clear') && Math.random() < 0.5) {
       const p = cam.clone().add(new THREE.Vector3(rnd(6), rnd(2) - 0.5, rnd(6)));
       fx.emit(p, new THREE.Vector3(rnd(0.1), rnd(0.05), rnd(0.1)), this.c.setRGB(1, 0.95, 0.8), 0.25, 0.025, 4, 0, 0, true);
     }
@@ -83,11 +83,18 @@ export class AmbientLife {
       p.y = w.terrain.getHeight(p.x, p.z) + 0.5 + Math.random() * 2;
       if (p.y > w.waterLevel + 0.5) fx.emit(p, new THREE.Vector3(rnd(0.4), rnd(0.2), rnd(0.4)), this.c.setRGB(0.75, 1, 0.3), 0.9, 0.06, 3 + Math.random() * 3, 0, 0, true);
     }
-    // rain splashes
-    if (sky.weather === 'rain') for (let i = 0; i < 6; i++) {
+    // rain splashes and bouncing hail stones (rate follows the intensity)
+    const wxp = sky.wx?.p;
+    const rainK = wxp ? wxp.rain : sky.weather === 'rain' ? 0.7 : 0;
+    for (let i = 0; i < Math.round(rainK * 10); i++) {
       const p = new THREE.Vector3(cam.x + rnd(14), 0, cam.z + rnd(14));
       p.y = Math.max(w.terrain.getHeight(p.x, p.z), w.waterLevel) + 0.05;
       fx.emit(p, new THREE.Vector3(rnd(0.5), 1.2, rnd(0.5)), this.c.setRGB(0.8, 0.85, 0.95), 0.5, 0.05, 0.25, 6, 1);
+    }
+    if (wxp && wxp.hail > 0.15) for (let i = 0; i < Math.round(wxp.hail * 7); i++) {
+      const p = new THREE.Vector3(cam.x + rnd(12), 0, cam.z + rnd(12));
+      p.y = Math.max(w.terrain.getHeight(p.x, p.z), w.waterLevel) + 0.08;
+      fx.emit(p, new THREE.Vector3(rnd(1.2), 2.2 + Math.random() * 1.5, rnd(1.2)), this.c.setRGB(0.92, 0.95, 1), 0.85, 0.06, 0.5, 9.8, 0);
     }
   }
 

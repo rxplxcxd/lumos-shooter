@@ -1,3 +1,5 @@
+import type { Weather } from '../world/SkySystem';
+import { ReplayRecorder, Killcam } from './Replay';
 import { MatchStats } from './MatchStats';
 import { Knockables } from '../world/Knockables';
 import { StreetLights } from '../world/StreetLights';
@@ -77,6 +79,8 @@ export class GameWorld {
   knock: Knockables | null = null;
   lights: StreetLights | null = null;
   stats: MatchStats;
+  replay!: ReplayRecorder;
+  killcam!: Killcam;
   /** squad pings (location / enemy / loot / vehicle / danger) shown in the world and on the minimap */
   pings: Ping[] = [];
 
@@ -102,7 +106,7 @@ export class GameWorld {
     }
   }
 
-  async init(terrain: Terrain, opts: { time?: number; weather?: 'clear' | 'overcast' | 'fog' | 'rain'; timeSpeed?: number } = {}) {
+  async init(terrain: Terrain, opts: { time?: number; weather?: Weather; timeSpeed?: number; dynamicWeather?: boolean; seed?: number } = {}) {
     await this.physics.create();
     const q = QUALITY_PRESETS[settings.data.quality];
     this.scene.add(this.root);
@@ -114,11 +118,12 @@ export class GameWorld {
     this.water = new Water(Math.min(q.far * 2.2, 4000), this.waterLevel, this.lowSpec ? 24 : q.waterHigh ? 128 : 64, q.waterHigh);
     this.water.setTerrain(terrain);
     this.root.add(this.water.mesh);
-    this.sky = new SkySystem(this.scene, q.shadows, q.far, { clouds: q.clouds, renderer: this.engine.renderer, envMap: q.envMap, shadowRange: q.shadowRange });
+    this.sky = new SkySystem(this.scene, q.shadows, q.far, { clouds: q.clouds, renderer: this.engine.renderer, envMap: q.envMap, shadowRange: q.shadowRange, atmo: this.engine.atmo, atmoOn: this.engine.hasAtmosphere });
+    this.sky.fogBase = this.waterLevel + 1.5;
     this.sky.attachCamera(this.engine.camera);
     this.sky.time = opts.time ?? 13;
     this.sky.speed = opts.timeSpeed ?? 0;
-    this.sky.setWeather(opts.weather ?? 'clear', this.scene);
+    this.sky.initWeather(this.audio, opts.seed ?? 1, opts.weather ?? 'clear', q.precip, !!opts.dynamicWeather, this.time);
     this.effects = new Effects(this.scene, q.particles, q.decals);
     this.effects.ground = (x, z) => Math.max(this.terrain.getHeight(x, z), this.waterLevel - 30);
     this.effects.onCasingLand = (p) => this.audio.play('shell_drop', { pos: p, volume: 0.25, maxDist: 15, throttle: 90 });
@@ -128,6 +133,8 @@ export class GameWorld {
       this.effects.setDebrisSource(rock, casing);
     }).catch(() => {});
     this.ballistics = new Ballistics(this);
+    this.replay = new ReplayRecorder(this);
+    this.killcam = new Killcam(this, this.replay);
     if (q.ambientLife) this.ambient = new AmbientLife(this);
     this.knock = new Knockables(this);
     const nLights = ({ potato: 0, low: 2, medium: 4, high: 6, ultra: 8 } as Record<string, number>)[settings.data.quality] ?? 4;
@@ -325,10 +332,15 @@ export class GameWorld {
     for (const u of this.updaters) u(dt);
     this.mode?.update(dt);
     this.net?.update(dt);
+    // killcam replay: record always, play back over the live world (camera / ghosts / events)
+    this.replay?.record(dt);
+    this.killcam?.update(dt);
     const cam = this.engine.camera;
     const focus = this.player?.soldier.pos ?? cam.position;
     wind.uTime.value += dt;
-    wind.uStrength.value = this.sky.weather === 'rain' ? 1.8 : this.sky.weather === 'overcast' ? 1.3 : 1;
+    wind.uStrength.value = 0.6 + (this.sky.wx?.p.wind ?? 1) * 0.75;
+    this.sky.clock = this.time;
+    this.engine.rainLens = this.player?.soldier.inVehicle && !this.player.soldier.inVehicle.exposedSeats ? 0 : this.sky.lens;
     this.sky.update(dt, focus);
     this.water.update(this.time, this.sky.sunDir, this.sky.fog, this.sky.brightness, cam.position);
     this.effects.update(dt);
@@ -356,9 +368,13 @@ export class GameWorld {
 
   dispose() {
     if (this.thermalOn) { this.thermalT = 0; this.setThermal(false); }
+    this.killcam?.dispose();
+    this.replay?.dispose();
     this.net?.dispose(); this.net = null;
     this.ambient?.dispose();
     this.lights?.dispose(); this.lights = null;
+    this.sky?.dispose();
+    this.engine.rainLens = 0; this.engine.atmo.wet = 0; this.engine.atmo.lightning = 0;
     this.knock?.dispose(); this.knock = null;
     for (const v of [...this.vehicles]) v.dispose();
     for (const s of this.soldiers) s.dispose();

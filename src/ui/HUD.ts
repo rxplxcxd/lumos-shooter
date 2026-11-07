@@ -64,6 +64,8 @@ export class HUD {
     add('points', 'points hidden');
     add('toast', 'toast');
     add('medals', 'medals');
+    add('killcam', 'killcam hidden', `<div class="bars"><i></i><i></i></div><div class="kc-top"><span class="rec">●</span> KILLCAM <b class="slow hidden">ZEITLUPE</b></div>
+      <div class="kc-bottom"><div class="who"></div><div class="meta"></div><div class="prog"><i></i></div><div class="skip"></div></div>`);
     add('dmgnums', 'dmgnums');
     add('pings', 'pings');
     add('story', 'story hidden');
@@ -118,6 +120,25 @@ export class HUD {
       b.on('medal', (m: Medal) => this.showMedal(m)),
       b.on('hitmarker', (e: { target: Actor; dealt: number; zone: HitZone; kill: boolean; armor: boolean }) => this.dmgNumber(e)),
       b.on('ping', (p: Ping) => this.addPingEl(p)),
+      b.on('killcam', (e: { active: boolean; killer?: Actor; weapon?: string; dist?: number; hp?: number }) => {
+        const el = this.els.killcam;
+        el.classList.toggle('hidden', !e.active);
+        this.root.classList.toggle('kc', e.active);
+        this.w.engine.look = e.active ? 5 : 0;
+        if (e.active && e.killer) {
+          (el.querySelector('.who') as HTMLElement).innerHTML = `Getötet von <b>${e.killer.name}</b>`;
+          (el.querySelector('.meta') as HTMLElement).textContent = `${e.weapon ?? ''} · ${Math.round(e.dist ?? 0)} m · ${Math.max(0, Math.round(e.hp ?? 0))} HP übrig`;
+          (el.querySelector('.skip') as HTMLElement).innerHTML = `<span class="glyph">${this.w.input.glyph('jump')}</span> Überspringen`;
+        }
+      }),
+      b.on('killcamHit', (e: { zone: string; kill: boolean }) => {
+        const el = this.els.hit;
+        el.style.color = e.kill ? '#ff3b3b' : e.zone === 'head' ? '#ffd23b' : '#ffffff';
+        el.style.transform = e.kill ? 'scale(1.5)' : 'scale(1)';
+        el.classList.add('show');
+        this.hitT = e.kill ? 0.5 : 0.12;
+        this.w.audio.ui(e.kill ? 'confirm' : 'cursor');
+      }),
     );
   }
 
@@ -232,7 +253,8 @@ export class HUD {
       ${Object.keys(medals).length ? `<div class="medal-list">${Object.entries(medals).map(([n, c]) => `<span>${n}${c > 1 ? ` ×${c}` : ''}</span>`).join('')}</div>` : ''}
       <p style="color:var(--muted)">+${r.xp + st.bonusXp} XP${st.bonusXp ? ` (inkl. ${st.bonusXp} Medaillen-XP)` : ''} · +${r.coins} Lumos Coins</p>
       <div class="play-row" style="justify-content:center"><button class="btn" data-quit>Zurück zur Lobby</button></div></div>`;
-    setTimeout(() => { e.classList.remove('hidden'); this.w.input.unlock(); }, r.win ? 2500 : 4000);
+    const reveal = () => { if (this.w.killcam?.busy) { setTimeout(reveal, 300); return; } e.classList.remove('hidden'); this.w.input.unlock(); };
+    setTimeout(reveal, r.win ? 2500 : 4000);
     (e.querySelector('[data-quit]') as HTMLElement).onclick = () => this.onQuit?.();
   }
 
@@ -275,6 +297,10 @@ export class HUD {
     if (!p) return;
     const s = p.soldier;
     this.updateWorldMarkers(dt);
+    if (this.w.killcam?.active) {
+      (this.els.killcam.querySelector('.prog i') as HTMLElement).style.width = `${(this.w.killcam.progress * 100).toFixed(1)}%`;
+      (this.els.killcam.querySelector('.slow') as HTMLElement).classList.toggle('hidden', !this.w.killcam.slowMo);
+    }
     // hitmarker & damage indicators every frame
     if (this.hitT > 0) { this.hitT -= dt; if (this.hitT <= 0) this.els.hit.classList.remove('show'); }
     for (let i = this.dmgDirs.length - 1; i >= 0; i--) {
