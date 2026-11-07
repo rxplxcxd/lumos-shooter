@@ -7,3 +7,4 @@ dist/
 assets-src/
 .DS_Store
 coverage/
+public/assets/_tmp/

@@ -742,5 +742,29 @@
   "faces": 70831,
   "animations": 0,
   "source": "sketchfab"
+ },
+ "b_eurobuild2": {
+  "uid": "43bcba64950045d586fd571b46b573f5",
+  "title": "European Buildings Asset Pack 2",
+  "author": "3DBuilder",
+  "author_username": "EddyNL",
+  "url": "https://sketchfab.com/3d-models/european-buildings-asset-pack-2-43bcba64950045d586fd571b46b573f5",
+  "license": "CC Attribution",
+  "license_url": "http://creativecommons.org/licenses/by/4.0/",
+  "faces": 9830,
+  "animations": 0,
+  "source": "sketchfab"
+ },
+ "b_eurobuild3": {
+  "uid": "b4fe252345214a3ea1abc834af42944d",
+  "title": "European Buildings Asset Pack 3",
+  "author": "3DBuilder",
+  "author_username": "EddyNL",
+  "url": "https://sketchfab.com/3d-models/european-buildings-asset-pack-3-b4fe252345214a3ea1abc834af42944d",
+  "license": "CC Attribution",
+  "license_url": "http://creativecommons.org/licenses/by/4.0/",
+  "faces": 15677,
+  "animations": 0,
+  "source": "sketchfab"
  }
 }

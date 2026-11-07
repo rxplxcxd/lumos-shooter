@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Simplex, smoothstep, lerp } from './Noise';
 import type { Physics } from '../physics/Physics';
 
-export interface Flat { x: number; z: number; r: number; h?: number; blend?: number; color?: [number, number, number] }
+export interface Flat { x: number; z: number; r: number; h?: number; blend?: number; color?: [number, number, number]; /** lawn: colour without the paved-concrete detail */ grass?: boolean; /** square instead of round (half size = r) */ square?: boolean }
 export interface Road { pts: [number, number][]; width: number }
 export interface Lake { x: number; z: number; r: number; depth: number }
 export interface TerrainOptions {
@@ -157,9 +157,12 @@ export class Terrain {
       c.lerp(snow, smoothstep(62, 78, h) * (1 - smoothstep(0.35, 0.55, slope)));
       for (const f of this.opts.flats ?? []) {
         if (!f.color) continue;
-        const d = Math.hypot(x - f.x, z - f.z);
-        const w = 1 - smoothstep(f.r * 0.85, f.r + 6, d);
-        if (w > 0) { c.lerp(new THREE.Color(f.color[0], f.color[1], f.color[2]), w * 0.85); aFlat[i] = Math.max(aFlat[i], w); }
+        const d = f.square ? Math.max(Math.abs(x - f.x), Math.abs(z - f.z)) : Math.hypot(x - f.x, z - f.z);
+        const w = f.square ? 1 - smoothstep(f.r - 2, f.r + 2, d) : 1 - smoothstep(f.r * 0.85, f.r + 6, d);
+        if (w > 0) {
+          c.lerp(new THREE.Color(f.color[0], f.color[1], f.color[2]), w * (f.grass ? 1 : 0.85));
+          aFlat[i] = f.grass ? aFlat[i] * (1 - w) : Math.max(aFlat[i], w);
+        }
       }
       const r = this.roadMask[i];
       if (r > 0) c.lerp(asphalt, r);

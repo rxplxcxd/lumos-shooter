@@ -86,7 +86,7 @@ export async function buildCity(mb: MapBuilder, cx: number, cz: number, h: numbe
     if (detail > 0) {
       for (const [sx, sz] of [[1, 1], [-1, -1]] as const) {
         await mb.place('kit:street:TrafficLight_2', ix + sx * (ROAD_HW + 1.0), iz + sz * (ROAD_HW + 1.0), sx > 0 ? Math.PI : 0,
-          { y: h + CURB, scale: 5.5, collider: 'box', surface: 'metal', batch: roads });
+          { y: h + CURB, scale: 5.5, collider: 'pole', surface: 'metal', batch: roads });
       }
       if (detail > 0.6) for (const [sx, sz] of [[1, -1], [-1, 1]] as const) {
         await mb.place('kit:cityprops:Crossing', ix + sx * (ROAD_HW + 0.8), iz + sz * (ROAD_HW + 0.8), sx > 0 ? -Math.PI / 2 : Math.PI / 2, { y: h + CURB, collider: 'box', surface: 'metal', batch: roads });
@@ -117,6 +117,9 @@ export async function buildCity(mb: MapBuilder, cx: number, cz: number, h: numbe
     const bx = cx + blockCenters[bi], bz = cz + blockCenters[bj];
     const half = (offs[bi + 1] - offs[bi]) / 2 - ROAD_HW;
     const plaza = bi === plazaIdx && bj === plazaIdx;
+    // district: modern high-rise blocks, a historic old town (photo-textured European buildings) and a city park
+    const kind: 'plaza' | 'oldtown' | 'park' | 'modern' = plaza ? 'plaza' : bi === 0 && bj < 2 ? 'oldtown' : bi === blockCenters.length - 1 && bj === blockCenters.length - 1 ? 'park' : 'modern';
+    const historic = kind === 'oldtown' || kind === 'park';
     const g = shared ?? new THREE.Group(); if (!shared) g.name = `block_${bi}_${bj}`;
     const props = shared ?? new THREE.Group(); if (!shared) props.name = `props_${bi}_${bj}`;
     const near = new THREE.Group(), far = new THREE.Group();
@@ -144,11 +147,16 @@ export async function buildCity(mb: MapBuilder, cx: number, cz: number, h: numbe
       const { nx, nz } = sides[si];
       const at = (u: number, inset: number) => ({ x: bx + nx * (edge - inset) + (nz !== 0 ? u : 0), z: bz + nz * (edge - inset) + (nx !== 0 ? u : 0) });
       const faceRoad = Math.atan2(nx, nz); // yaw that turns +Z towards the road
-      // street lights along the curb
+      // street lights along the curb (ornate double lanterns in the historic districts)
       for (const u of [-half * 0.62, 0, half * 0.62]) {
         const p = at(u, 0.1);
-        await mb.place('kit:street:Streetlight_Single', p.x, p.z, faceRoad, { y: top, scale: 5.5, collider: 'box', surface: 'metal', batch: g });
-        info.lamps.push(new THREE.Vector3(p.x, top + 5.6, p.z));
+        if (historic) {
+          await mb.place('kit:euro_b:OrnateLamp', p.x, p.z, nz !== 0 ? 0 : Math.PI / 2, { y: top, collider: 'pole', surface: 'metal', batch: g });
+          info.lamps.push(new THREE.Vector3(p.x, top + 4.9, p.z));
+        } else {
+          await mb.place('kit:street:Streetlight_Single', p.x, p.z, faceRoad, { y: top, scale: 5.5, collider: 'pole', surface: 'metal', batch: g });
+          info.lamps.push(new THREE.Vector3(p.x, top + 5.6, p.z));
+        }
       }
       if (detail === 0) continue;
       // trees in planters between the lamps
@@ -214,6 +222,10 @@ export async function buildCity(mb: MapBuilder, cx: number, cz: number, h: numbe
         if (detail > 0.3) tree(R.pick(['CommonTree_3', 'CommonTree_5', 'CommonTree_4']), x2, top + 0.5, z2, 0.6, false);
         if (detail > 0.3) await mb.place('kit:cityprops:ParkBenchLong', bx + Math.cos(a) * r * 0.82, bz + Math.sin(a) * r * 0.82, -a, { y: top, collider: 'box', surface: 'wood', batch: props });
       }
+    } else if (kind === 'oldtown') {
+      await oldTownBlock(mb, bx, bz, half - t - 0.15, h, R, g, props, info, bi === 0 && bj === 1, detail);
+    } else if (kind === 'park') {
+      await parkBlock(mb, bx, bz, half - t, h, R, g, props, info, tree, detail);
     } else {
       const quads: [number, number][] = [[1, 1], [-1, 1], [1, -1], [-1, -1]];
       const parkQ = R.chance(0.3) ? R.int(0, 3) : -1;
@@ -273,9 +285,158 @@ export async function buildCity(mb: MapBuilder, cx: number, cz: number, h: numbe
     try { lod = await w.assets.kitPiece('nature_lod', name); } catch { lod = null; }
     let lod2: THREE.Object3D | null = null;
     try { lod2 = await w.assets.kitPiece('nature_lod2', name); } catch { lod2 = null; }
-    mb.scatter.add(piece, mats, 70, true, 480, lod, 60, lod2, 160);
+    if (/Grass|Flower/.test(name)) mb.scatter.add(piece, mats, 70, false, 140);
+    else mb.scatter.add(piece, mats, 70, true, 480, lod, 60, lod2, 160);
   }
   return info;
+}
+
+// --------------------------------------------------------------------------- historic districts
+const EURO_POOL = ['DutchRow', 'BrickHouse_A', 'NarrowHouse', 'BrickHouse_B', 'BrickHouse_A', 'NarrowHouse', 'BrickHouse_B', 'FacadeShell'];
+
+/**
+ * Old town block: terraced rows of historic houses along all four streets, facades flush with the
+ * sidewalk, backs towards a closed courtyard. Rows are stretched (±25 %) so they close without gaps.
+ */
+async function oldTownBlock(mb: MapBuilder, bx: number, bz: number, lot: number, h: number, R: Rng, g: THREE.Group, props: THREE.Group, info: CityInfo, townHall: boolean, detail: number) {
+  const sizes = new Map<string, THREE.Vector3>();
+  for (const p of new Set([...EURO_POOL, 'TownHall'])) sizes.set(p, await mb.sizeOf(`kit:euro_a:${p}`));
+  const dims = (p: string) => { const sz = sizes.get(p)!; return p === 'TownHall' ? { w: sz.z, d: sz.x } : { w: sz.x, d: sz.z }; };
+  const depthMax = 16.5;
+  // houses whose side walls are textured brick can close a row at a street corner
+  const CORNER = ['BrickHouse_A', 'CornerShop', 'BrickHouse_B'];
+  const sides = [{ nx: 0, nz: 1 }, { nx: 0, nz: -1 }, { nx: 1, nz: 0 }, { nx: -1, nz: 0 }];
+  // end depths of the north / south rows at their west (-x) and east (+x) ends
+  const endDepth = { n: [depthMax, depthMax], s: [depthMax, depthMax] };
+  for (let si = 0; si < 4; si++) {
+    const { nx, nz } = sides[si];
+    const ns = nz !== 0;
+    // north/south rows run the full width; east/west rows close the gap between their corner houses
+    let from = -lot, to = lot;
+    if (!ns) {
+      const ix = nx > 0 ? 1 : 0;
+      from = -lot + endDepth.s[ix]; to = lot - endDepth.n[ix];
+    }
+    const len = to - from;
+    if (len < 5) continue;
+    const row: string[] = [];
+    let sum = 0;
+    for (let guard = 0; sum < len - 2 && guard < 40; guard++) {
+      const first = row.length === 0;
+      const p = ns && first ? R.pick(CORNER) : R.pick(EURO_POOL);
+      if (p === 'FacadeShell' && (first || row[row.length - 1] === 'FacadeShell')) continue;
+      if (!first && p === row[row.length - 1]) continue; // no identical neighbours
+      const w = dims(p).w;
+      if (sum + w > len * 1.2 && sum > len * 0.8) break;
+      if (sum + w > len * 1.2) continue;
+      row.push(p); sum += w;
+    }
+    if (!row.length) continue;
+    // the last house of a north/south row is a corner house too
+    if (ns && row.length > 1 && !CORNER.includes(row[row.length - 1])) { sum -= dims(row[row.length - 1]).w; row[row.length - 1] = R.pick(CORNER); sum += dims(row[row.length - 1]).w; }
+    if (townHall && si === 0) { const mid = Math.floor(row.length / 2); sum += dims('TownHall').w - dims(row[mid]).w; row[mid] = 'TownHall'; }
+    const k = THREE.MathUtils.clamp(len / sum, 0.7, 1.35);
+    let u = (from + to) / 2 - (sum * k) / 2;
+    const faceYaw = Math.atan2(nx, nz);
+    row.forEach((p, idx) => {
+      const d = dims(p);
+      const depth = Math.min(d.d, depthMax);
+      if (ns && idx === 0) endDepth[nz > 0 ? 'n' : 's'][0] = depth;
+      if (ns && idx === row.length - 1) endDepth[nz > 0 ? 'n' : 's'][1] = depth;
+    });
+    for (const p of row) {
+      const d = dims(p);
+      const wS = d.w * k, depth = Math.min(d.d, depthMax);
+      const cu = u + wS / 2; u += wS;
+      const x = bx + nx * (lot - depth / 2) + (ns ? cu : 0), z = bz + nz * (lot - depth / 2) + (ns ? 0 : cu);
+      const sv = p === 'TownHall' ? new THREE.Vector3(depth / d.d, 1, k) : new THREE.Vector3(k, 1, depth / d.d);
+      await mb.place(`kit:euro_a:${p}`, x, z, p === 'TownHall' ? faceYaw - Math.PI / 2 : faceYaw, { y: h - 0.05, scaleV: sv, surface: 'stone', loot: p === 'TownHall' ? 4 : 2, batch: g });
+    }
+  }
+  // closed courtyard behind the rows: a few trees and junk (seen from rooftops / windows)
+  if (detail > 0.3) {
+    const inner = lot - depthMax;
+    if (inner > 3) {
+      await mb.w.knock?.add('cityprops', 'Dumpster', new THREE.Vector3(bx + R.range(-inner + 2, inner - 2), h, bz + R.range(-inner + 2, inner - 2)), R.next() * 6, 1, 260);
+      await mb.place('kit:cityprops:TarpCrates', bx + R.range(-inner + 2, inner - 2), bz + R.range(-inner + 2, inner - 2), R.next() * 6, { y: h, collider: 'box', surface: 'wood', batch: props });
+    }
+  }
+  void info;
+}
+
+/**
+ * City park: lawn, a domed bandstand in the middle, stepping-stone paths from the four streets,
+ * gazebos and pavilions, flower beds, benches, ornate lanterns and a wrought-iron fence.
+ */
+async function parkBlock(mb: MapBuilder, bx: number, bz: number, lot: number, h: number, R: Rng, g: THREE.Group, props: THREE.Group, info: CityInfo,
+  tree: (name: string, x: number, y: number, z: number, sc: number, trunk?: boolean) => void, detail: number) {
+  const w = mb.w;
+  await mb.place('kit:euro_b:Bandstand', bx, bz, R.int(0, 3) * Math.PI / 2, { y: h - 0.02, surface: 'stone', loot: 4, batch: g });
+  // paths from the four entrances to the bandstand
+  const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  for (const [dx, dz] of dirs) {
+    for (let r = 8.5; r < lot - 0.5; r += 2.1) {
+      await mb.place('kit:nature:RockPath_Round_Wide', bx + dx * r, bz + dz * r, R.next() * 6, { y: h + 0.01, scale: 1.3, collider: 'none', batch: g });
+    }
+    // lanterns either side of the path
+    for (const s of [-1, 1]) {
+      const r = lot * 0.55;
+      const x = bx + dx * r + dz * s * 2.4, z = bz + dz * r + dx * s * 2.4;
+      await mb.place('kit:euro_b:OrnateLamp', x, z, dx !== 0 ? Math.PI / 2 : 0, { y: h, collider: 'pole', surface: 'metal', batch: g });
+      info.lamps.push(new THREE.Vector3(x, h + 4.9, z));
+    }
+    // benches facing the bandstand
+    if (detail > 0.3) {
+      const r = 10.5;
+      for (const s of [-1, 1]) {
+        const x = bx + dx * r + dz * s * 3.2, z = bz + dz * r + dx * s * 3.2;
+        await mb.place('kit:cityprops:ParkBenchLong', x, z, Math.atan2(-dx, -dz) + Math.PI / 2, { y: h, collider: 'box', surface: 'wood', batch: props });
+      }
+      await w.knock?.add('cityprops', 'TrashCanLarge', new THREE.Vector3(bx + dx * (r + 1.5) + dz * 4.6, h, bz + dz * (r + 1.5) + dx * 4.6), R.next() * 6, 1, 30);
+    }
+  }
+  // the four quadrants: gazebo, wooden pavilion, white pavilion, flower garden
+  const quads: [number, number, string][] = [[1, 1, 'kit:euro_b:Gazebo'], [-1, 1, 'kit:euro_b:Pavilion_Wood'], [1, -1, 'kit:euro_a:Pavilion_White'], [-1, -1, 'kit:euro_a:FlowerBed']];
+  for (const [sx, sz, id] of quads) {
+    const qx = bx + sx * lot * 0.58, qz = bz + sz * lot * 0.58;
+    await mb.place(id, qx, qz, Math.atan2(-sx, -sz), { y: h - 0.02, surface: 'wood', batch: g, collider: id.endsWith('FlowerBed') ? 'box' : 'mesh' });
+    if (detail > 0) {
+      for (let k = 0; k < 3; k++) {
+        const a = R.next() * Math.PI * 2, r = 6.5 + R.next() * 3;
+        const tx = THREE.MathUtils.clamp(qx + Math.cos(a) * r, bx - lot + 1.5, bx + lot - 1.5), tz = THREE.MathUtils.clamp(qz + Math.sin(a) * r, bz - lot + 1.5, bz + lot - 1.5);
+        if (Math.abs(tx - bx) < 3.5 || Math.abs(tz - bz) < 3.5) continue; // keep the paths free
+        tree(R.pick(['CommonTree_1', 'CommonTree_2', 'CommonTree_3', 'CommonTree_5']), tx, h, tz, 0.75 + R.next() * 0.45);
+      }
+      for (let k = 0; k < 4; k++) {
+        const tx = qx + R.range(-5, 5), tz = qz + R.range(-5, 5);
+        if (Math.abs(tx - bx) < 3 || Math.abs(tz - bz) < 3) continue;
+        await mb.place(`kit:nature:${R.pick(['Bush_Common', 'Bush_Common_Flowers', 'Flower_3_Group', 'Flower_4_Group'])}`, tx, tz, R.next() * 6, { y: h, collider: 'none', batch: g });
+      }
+    }
+  }
+  // lawn detail: grass tufts and flowers (instanced, off the paths)
+  if (detail > 0.3) {
+    const tufts = ['Grass_Common_Short', 'Grass_Common_Tall', 'Flower_3_Group'];
+    for (let k = 0; k < Math.round(140 * detail); k++) {
+      const tx = bx + R.range(-lot + 1, lot - 1), tz = bz + R.range(-lot + 1, lot - 1);
+      if (Math.abs(tx - bx) < 2.2 || Math.abs(tz - bz) < 2.2 || Math.hypot(tx - bx, tz - bz) < 7.5) continue;
+      tree(R.pick(tufts), tx, h - 0.02, tz, 0.8 + R.next() * 0.6, false);
+    }
+  }
+  // wrought-iron fence along the lot edge with gaps for the four paths
+  if (detail > 0.3) {
+    const gate = await mb.sizeOf('kit:euro_b:IronGate');
+    const seg = gate.x;
+    for (const [nx, nz] of dirs) {
+      const n = Math.floor((2 * lot) / seg);
+      for (let i = 0; i < n; i++) {
+        const u = -lot + (i + 0.5) * ((2 * lot) / n);
+        if (Math.abs(u) < 3.2) continue;
+        const x = bx + nx * (lot - 0.4) + (nz !== 0 ? u : 0), z = bz + nz * (lot - 0.4) + (nx !== 0 ? u : 0);
+        await mb.place('kit:euro_b:IronGate', x, z, nz !== 0 ? 0 : Math.PI / 2, { y: h, scaleV: new THREE.Vector3(((2 * lot) / n) / seg, 1, 1), collider: 'box', surface: 'metal', batch: props });
+      }
+    }
+  }
 }
 
 export interface DressItem { id: string; n: number; mass?: number; collider?: 'box' | 'mesh' | 'none'; scale?: number; surface?: 'metal' | 'wood' | 'stone'; lamp?: number }
@@ -302,7 +463,7 @@ export async function dressPOI(mb: MapBuilder, cx: number, cz: number, r: number
       const yaw = R.next() * Math.PI * 2;
       const [kit, piece] = it.id.split(':');
       if (it.mass) await w.knock?.add(kit as 'cityprops', piece, new THREE.Vector3(x, ground, z), yaw, it.scale ?? 1, it.mass);
-      else await mb.place(`kit:${it.id}`, x, z, it.lamp ? 0 : yaw, { y: ground, scale: it.scale, collider: it.collider ?? 'box', surface: it.surface ?? 'metal', batch: g });
+      else await mb.place(`kit:${it.id}`, x, z, it.lamp ? 0 : yaw, { y: ground, scale: it.scale, collider: it.collider ?? (it.lamp ? 'pole' : 'box'), surface: it.surface ?? 'metal', batch: g });
       if (it.lamp) w.lights?.add(new THREE.Vector3(x, ground + it.lamp, z));
     }
   }
@@ -319,7 +480,7 @@ export async function lampRow(mb: MapBuilder, x0: number, z0: number, x1: number
     for (const s of [-1, 1]) {
       const x = x0 + (x1 - x0) * (d / len) + nx * side * s, z = z0 + (z1 - z0) * (d / len) + nz * side * s;
       const y = w.terrain.getHeight(x, z);
-      await mb.place(`kit:${id}`, x, z, 0, { y, scale, collider: 'box', surface: 'metal', batch: g });
+      await mb.place(`kit:${id}`, x, z, 0, { y, scale, collider: 'pole', surface: 'metal', batch: g });
       w.lights?.add(new THREE.Vector3(x, y + height * scale, z));
     }
   }

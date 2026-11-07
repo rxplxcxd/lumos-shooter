@@ -120,6 +120,8 @@ export const KITS = {
   guns: 'kits/guns',
   street: 'kits/streetprops',
   cityprops: 'kits/cityprops',
+  euro_a: 'kits/euro_a',
+  euro_b: 'kits/euro_b',
   attachments: 'kits/attachments',
 } as const;
 export type KitId = keyof typeof KITS;

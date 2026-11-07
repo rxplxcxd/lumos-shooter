@@ -46,7 +46,7 @@ export class MapBuilder {
   }
 
   /** id = manifest id or kit:<kit>:<piece> */
-  async place(id: string, x: number, z: number, yaw = 0, o: { y?: number; scale?: number; scaleV?: THREE.Vector3; collider?: 'mesh' | 'box' | 'none'; surface?: Surface; batch?: boolean | THREE.Group; destructible?: number; loot?: number; noGround?: boolean } = {}) {
+  async place(id: string, x: number, z: number, yaw = 0, o: { y?: number; scale?: number; scaleV?: THREE.Vector3; collider?: 'mesh' | 'box' | 'pole' | 'none'; surface?: Surface; batch?: boolean | THREE.Group; destructible?: number; loot?: number; noGround?: boolean } = {}) {
     let obj: THREE.Object3D;
     try {
       if (id.startsWith('kit:')) { const [, kit, piece] = id.split(':'); obj = await this.w.assets.kitPiece(kit as any, piece); }
@@ -65,7 +65,7 @@ export class MapBuilder {
     else if (col === 'box') {
       const b = new THREE.Box3().setFromObject(obj);
       collider = this.w.physics.addBox(b.getCenter(new THREE.Vector3()), b.getSize(new THREE.Vector3()).multiplyScalar(0.5));
-    }
+    } else if (col === 'pole') collider = this.poleCollider(obj);
     if (collider) this.w.registerSurface(collider, o.surface ?? 'stone');
     if (o.destructible && collider) { this.w.registerDestructible(collider, obj, o.destructible, o.surface ?? 'wood'); this.w.root.add(obj); }
     else if (o.batch instanceof THREE.Group) o.batch.add(obj);
@@ -79,6 +79,25 @@ export class MapBuilder {
       this.lootSpots.push(new THREE.Vector3(lx, this.w.terrain.getHeight(lx, lz) + 0.05, lz));
     }
     return obj;
+  }
+
+  /** lamp posts, traffic lights, signs: collide with the post only (arms / lanterns overhead stay passable) */
+  poleCollider(obj: THREE.Object3D) {
+    obj.updateMatrixWorld(true);
+    const all = new THREE.Box3().setFromObject(obj);
+    const foot = new THREE.Box3();
+    const v = new THREE.Vector3();
+    obj.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      const p = m.geometry.getAttribute('position') as THREE.BufferAttribute;
+      for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i).applyMatrix4(m.matrixWorld); if (v.y < all.min.y + 0.6) foot.expandByPoint(v); }
+    });
+    if (foot.isEmpty()) foot.copy(all);
+    const c = foot.getCenter(new THREE.Vector3());
+    const hx = THREE.MathUtils.clamp((foot.max.x - foot.min.x) / 2, 0.08, 0.45), hz = THREE.MathUtils.clamp((foot.max.z - foot.min.z) / 2, 0.08, 0.45);
+    const hy = (all.max.y - all.min.y) / 2;
+    return this.w.physics.addBox(new THREE.Vector3(c.x, all.min.y + hy, c.z), new THREE.Vector3(hx, hy, hz));
   }
 
   async vehicle(id: string, x: number, z: number, yaw = 0, yOff = 0.2) {
@@ -164,6 +183,8 @@ export async function buildBRMap(w: GameWorld, seed: number, progress: Progress)
   // runway
   for (let x = -470; x <= -190; x += 28) flats.push({ x, z: 390, r: 18, h: 10, blend: 30, color: [0.32, 0.32, 0.34] });
   const c = pois[0];
+  // city park lawn (block south-east of the plaza)
+  flats.push({ x: c.x + 68, z: c.z + 68, r: 23.4, square: true, grass: true, color: [0.25, 0.43, 0.17] });
   // city street grid (kit roads are laid on top; the terrain roads flatten and pave underneath)
   const offs = [-102, -34, 34, 102], ext = 140;
   const exits: [number, number][] = [];
@@ -224,6 +245,7 @@ export async function buildBRMap(w: GameWorld, seed: number, progress: Progress)
   const h = pois[2];
   await mb.place('env_warehouses', h.x - 10, h.z - 10, Math.PI / 4, { surface: 'metal', loot: 8, y: h.h - 0.05 });
   await mb.place('env_warehouse', h.x + 25, h.z - 40, Math.PI / 4, { surface: 'metal', loot: 4, y: h.h - 0.05 });
+  await mb.place('kit:euro_b:Station', h.x - 38, h.z + 30, Math.PI / 4 + Math.PI, { surface: 'stone', loot: 6, y: h.h - 0.05 });
   for (let i = 0; i < 10; i++) await mb.place('env_boxes', h.x + R.range(-45, 45), h.z + R.range(-45, 45), R.next() * 6, { collider: 'box', surface: 'wood', destructible: 80, scale: 1.3, y: h.h });
   mb.flush();
   await dressPOI(mb, h.x, h.z, 70, [{ id: 'cityprops:Light', n: 7, lamp: 4.3 }, { id: 'cityprops:pallet1', n: 8, mass: 20 }, { id: 'cityprops:pallet2', n: 6, mass: 20 }, { id: 'cityprops:TarpCrates', n: 5, surface: 'wood' },
@@ -240,6 +262,7 @@ export async function buildBRMap(w: GameWorld, seed: number, progress: Progress)
   const a = pois[3];
   await mb.place('env_warehouse', a.x, a.z - 50, 0, { surface: 'metal', loot: 6, y: a.h - 0.05 });
   await mb.place('env_warehouse', a.x + 40, a.z - 50, 0, { surface: 'metal', loot: 4, y: a.h - 0.05 });
+  await mb.place('kit:euro_a:GlassArcade', a.x - 45, a.z - 42, 0, { surface: 'stone', loot: 4, y: a.h - 0.05 });
   mb.flush();
   await dressPOI(mb, a.x, a.z - 40, 45, [{ id: 'cityprops:Light', n: 5, lamp: 4.3 }, { id: 'cityprops:TarpCrates', n: 3, surface: 'wood' }, { id: 'cityprops:pallet2', n: 4, mass: 20 }, { id: 'cityprops:Utility', n: 2 }], R, 0.2);
   for (let x = -460; x <= -200; x += 26) for (const dz of [-12.5, 12.5]) w.lights?.add(new THREE.Vector3(x, terrain.getHeight(x, 390 + dz) + 0.6, 390 + dz));
@@ -253,6 +276,7 @@ export async function buildBRMap(w: GameWorld, seed: number, progress: Progress)
   const fa = pois[4];
   for (const [dx, dz] of [[-30, -20], [25, -30], [-20, 35]]) await mb.place('env_house', fa.x + dx, fa.z + dz, R.next() * 6, { surface: 'wood', loot: 4 });
   await mb.place('env_warehouse', fa.x + 30, fa.z + 30, 0.3, { surface: 'wood', loot: 5 });
+  await mb.place('kit:euro_b:Mansion', fa.x - 58, fa.z + 8, Math.PI / 2, { surface: 'stone', loot: 6 });
   mb.flush();
   await dressPOI(mb, fa.x, fa.z, 55, [{ id: 'cityprops:Light', n: 3, lamp: 4.3 }, { id: 'cityprops:TarpCrates', n: 4, surface: 'wood' }, { id: 'cityprops:pallet1', n: 6, mass: 20 }, { id: 'cityprops:TrashCanCap', n: 3, mass: 30 }], R, 0.25);
   await mb.vehicle('tractor', fa.x, fa.z, 0);
@@ -276,6 +300,7 @@ export async function buildBRMap(w: GameWorld, seed: number, progress: Progress)
     const dx = -60 + (i % 4) * 40, dz = i < 4 ? -22 : 22;
     await mb.place('env_house', su.x + dx, su.z + dz, i < 4 ? 0 : Math.PI, { surface: 'wood', loot: 3 });
   }
+  await mb.place('kit:euro_b:Villa', su.x + 8, su.z + 62, Math.PI, { surface: 'stone', loot: 5 });
   mb.flush();
   await lampRow(mb, su.x - 75, su.z, su.x + 75, su.z, 6.2, 30);
   {
@@ -363,7 +388,7 @@ export async function buildArena(w: GameWorld, seed: number, progress: Progress,
     const id = R.pick(['env_sandbag', 'env_barrier', 'item_crate', 'env_boxes']);
     await mb.place(id, x, z, R.next() * 6, { collider: 'box', surface: id === 'item_crate' || id === 'env_boxes' ? 'wood' : 'metal', scale: id === 'env_sandbag' ? 2.6 : 1.4, destructible: id === 'env_boxes' ? 90 : undefined, y });
   }
-  for (const [x, z] of [[-20, -70], [22, 72], [-60, 10], [60, -10]]) { await mb.place('kit:street:Streetlight_Double', x, z, 0, { scale: 5.5, collider: 'box', y, surface: 'metal' }); w.lights?.add(new THREE.Vector3(x, y + 5.8, z)); }
+  for (const [x, z] of [[-20, -70], [22, 72], [-60, 10], [60, -10]]) { await mb.place('kit:street:Streetlight_Double', x, z, 0, { scale: 5.5, collider: 'pole', y, surface: 'metal' }); w.lights?.add(new THREE.Vector3(x, y + 5.8, z)); }
   mb.flush();
   // main street: lamps both sides, bins / dumpsters / benches that react to fire and explosions
   await lampRow(mb, 0, -100, 0, 100, 7.5, 33, 'street:Streetlight_Single', 1.02, 5.5);

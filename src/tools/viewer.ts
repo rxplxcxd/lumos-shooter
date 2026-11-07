@@ -9,13 +9,15 @@ const files = (params.get('files') || '').split(',').filter(Boolean);
 const node = params.get('node'); // optional: render named children of a kit
 const hide = (params.get('hide') || '').split(',').filter(Boolean);
 const W = 360, H = 200;
+const SIDES = params.get('views') === 'sides'; // front (+Z) / back (-Z) / right (+X) / left (-X)
+const NV = SIDES ? 4 : 3;
 document.documentElement.style.setProperty('--cols', params.get('cols') || '3');
 const loader = new GLTFLoader();
 const draco = new DRACOLoader();
 draco.setDecoderPath('./draco/');
 loader.setDRACOLoader(draco);
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-renderer.setSize(W * 3, H);
+renderer.setSize(W * NV, H);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 function frame(obj: THREE.Object3D) {
@@ -43,11 +45,12 @@ async function renderOne(label: string, obj: THREE.Object3D) {
     const cam = new THREE.OrthographicCamera(-s * aspect, s * aspect, s, -s, -r * 10, r * 10);
     cam.up.copy(up); cam.position.copy(c).add(pos.multiplyScalar(r)); cam.lookAt(c); return cam;
   };
-  const cams = [mk(new THREE.Vector3(1, 0, 0)), mk(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, -1)), mk(new THREE.Vector3(1, 0.7, 1).normalize())];
+  const cams = SIDES ? [mk(new THREE.Vector3(0, 0.15, 1).normalize()), mk(new THREE.Vector3(0, 0.15, -1).normalize()), mk(new THREE.Vector3(1, 0.15, 0).normalize()), mk(new THREE.Vector3(-1, 0.15, 0).normalize())]
+    : [mk(new THREE.Vector3(1, 0, 0)), mk(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, -1)), mk(new THREE.Vector3(1, 0.7, 1).normalize())];
   renderer.setScissorTest(true);
   cams.forEach((cam, i) => { renderer.setViewport(i * W, 0, W, H); renderer.setScissor(i * W, 0, W, H); renderer.render(scene, cam); });
   const tile = document.createElement('div'); tile.className = 'tile';
-  const img = document.createElement('canvas'); img.width = W * 3; img.height = H;
+  const img = document.createElement('canvas'); img.width = W * NV; img.height = H;
   img.getContext('2d')!.drawImage(renderer.domElement, 0, 0);
   const l = document.createElement('div'); l.className = 'l';
   l.textContent = `${label}  ${size.x.toFixed(2)} x ${size.y.toFixed(2)} x ${size.z.toFixed(2)}`;

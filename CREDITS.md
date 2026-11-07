@@ -68,6 +68,8 @@ All 3D models, sounds and music in Lumos Strike come from **Sketchfab** and **it
 | `g_seagull` | [Seagulls animated](https://sketchfab.com/3d-models/seagulls-animated-73aed843190a4dfda55f2b65cc0f8d63) | vicente betoret ferrero (@deathcow) | CC Attribution |
 | `g_raven` | [Raven](https://sketchfab.com/3d-models/raven-60155d61e6904e87b899a96c4c106792) | David Clowes (@xdavidclowesx) | CC Attribution |
 | `p_cityprops` | [City Props Collection volume 1](https://sketchfab.com/3d-models/city-props-collection-volume-1-32b8b82bb1e9489c993799c91967a916) | TampaJoey (@TampaJoey) | Free Standard |
+| `b_eurobuild2` | [European Buildings Asset Pack 2](https://sketchfab.com/3d-models/european-buildings-asset-pack-2-43bcba64950045d586fd571b46b573f5) | 3DBuilder (@EddyNL) | CC Attribution |
+| `b_eurobuild3` | [European Buildings Asset Pack 3](https://sketchfab.com/3d-models/european-buildings-asset-pack-3-b4fe252345214a3ea1abc834af42944d) | 3DBuilder (@EddyNL) | CC Attribution |
 
 CC Attribution models are used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Models were re-encoded (Draco geometry, WebP textures) and re-scaled for the web; no other changes.
 
