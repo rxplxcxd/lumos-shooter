@@ -100,6 +100,7 @@ export class HUD {
       }),
       b.on('damage', (e: { target: Soldier; amount: number; info: any }) => {
         if (!e.target.isPlayer) return;
+        this.w.player?.flinchCam(e.info?.attacker?.pos ?? e.info?.point ?? null, e.amount);
         this.w.engine.damageVignette = Math.min(0.8, this.w.engine.damageVignette + e.amount / 120);
         this.w.input.rumble(Math.min(1, e.amount / 40), 0.6, 120);
         const from = e.info?.attacker?.pos ?? e.info?.point;

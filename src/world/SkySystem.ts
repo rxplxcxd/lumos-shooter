@@ -55,9 +55,12 @@ float milky(vec3 d){
 void main(){
   vec3 d = normalize(vDir);
   float h = d.y;
-  vec3 col = h > 0.0 ? mix(horizon, top, pow(clamp(h, 0.0, 1.0), 0.55)) : mix(horizon, ground, clamp(-h * 4.0, 0.0, 1.0));
+  // below the horizon the dome is exactly the fog colour: distant geometry (fully fogged at the far
+  // plane, e.g. the ocean seen from the drop plane) melts into it without a visible edge
+  vec3 col = h > 0.0 ? mix(horizon, top, pow(clamp(h, 0.0, 1.0), 0.55)) : horizon;
   float s = max(dot(d, normalize(sunDir)), 0.0);
-  col += sunColor * (pow(s, 1200.0) * 9.0 + pow(s, 14.0) * 0.28 + pow(s, 3.0) * 0.05) * (1.0 - coverage * 0.85);
+  float above = smoothstep(-0.02, 0.07, h);
+  col += sunColor * (pow(s, 1200.0) * 9.0 + (pow(s, 14.0) * 0.28 + pow(s, 3.0) * 0.05) * above) * (1.0 - coverage * 0.85);
   float hor = smoothstep(-0.04, 0.22, h);
   float clearSky = 1.0 - smoothstep(0.35, 0.95, coverage);
   if (night > 0.0) {

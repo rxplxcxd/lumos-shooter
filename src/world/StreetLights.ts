@@ -128,8 +128,10 @@ export class StreetLights {
     }
     for (const m of this.heads) m.emissiveIntensity = this.on * 4;
     for (const m of this.windows) m.emissiveIntensity = this.on * 0.9;
-    // real lights on the nearest lamps
-    if (this.on < 0.03) { for (const l of this.pool) l.visible = false; return; }
+    // real lights on the nearest lamps. The pool lights always stay visible (unused ones just get
+    // intensity 0): hiding a light changes the light count, and three.js would then recompile every
+    // lit material of the world — a multi-second hitch each time a lamp comes into range.
+    if (this.on < 0.03) { for (const l of this.pool) l.intensity = 0; return; }
     const cam = this.w.engine.camera.position;
     this.sortT -= dt;
     if (this.sortT <= 0) {
@@ -139,8 +141,7 @@ export class StreetLights {
     }
     for (let i = 0; i < this.pool.length; i++) {
       const lamp = this.lamps[i], light = this.pool[i];
-      if (!lamp || lamp.d2 > 140 * 140) { light.visible = false; continue; }
-      light.visible = true;
+      if (!lamp || lamp.d2 > 140 * 140) { light.intensity = 0; continue; }
       light.position.copy(lamp.p).y -= 0.4;
       let k = Math.min(1, this.on * 1.6 - lamp.delay * 0.6);
       if (lamp.flicker) k *= Math.sin(this.t * 37 + lamp.delay * 10) > -0.3 && Math.sin(this.t * 3.1) > -0.6 ? 1 : 0.1;

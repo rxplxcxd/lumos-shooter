@@ -111,6 +111,8 @@ export class Soldier implements Actor {
   lastSafePos = new THREE.Vector3();
   /** e.g. sitting in the drop plane */
   frozen = false;
+  /** neither rendered nor animated (inside the drop plane) */
+  hidden = false;
   /** multiplayer: '' local, 'human' remote player puppet, 'bot' host-bot puppet */
   netRemote: '' | 'human' | 'bot' = '';
   netId = '';
@@ -122,6 +124,7 @@ export class Soldier implements Actor {
   }
 
   modelId = 'char_mannequin';
+  staggerT = 0;
   async init(modelId = 'char_mannequin', gear = QUALITY_PRESETS[settings.data.quality].gear) {
     this.modelId = modelId;
     await this.model.init(this.w.assets, modelId, this.tint);
@@ -201,6 +204,8 @@ export class Soldier implements Actor {
     this.lastDamageTime = this.w.time;
     if (info.attacker && info.attacker !== this) this.lastAttacker = info.attacker;
     if (info.dir) this.model.flinch(info.dir, Math.min(2, dealt / 25 + 0.4));
+    // heavy hits make you stumble for a moment (slower, upper body reacts)
+    if (dealt >= 28 && this.alive) { this.staggerT = Math.min(0.5, 0.18 + dealt / 160); if (!this.isPlayer) this.model.setUpper(info.zone === 'head' ? 'hitHead' : 'hit', 0.06, 0.45); }
     this.w.bus.emit('damage', { target: this, amount: dealt, info });
     if (this.health <= 0) {
       if (!this.downed && this.w.mode?.allowDowned(this)) this.goDown(info);
@@ -282,6 +287,7 @@ export class Soldier implements Actor {
     if (this.downed) speed = 0.9;
     if (this.swimming) speed = this.sprinting ? 3.4 : 2.2;
     speed *= wpn.stats.moveMul * (1 - this.ads * 0.42);
+    if (this.staggerT > 0) { this.staggerT -= dt; speed *= 0.45; }
     if (this.busyKind === 'plate' || this.busyKind === 'heal') speed *= 0.55;
     if (this.sprintBoost > 0) this.sprintBoost -= dt;
     // slope: slower uphill, a little faster downhill
@@ -469,7 +475,8 @@ export class Soldier implements Actor {
     else if (sp > 6.2) m.setLoco('sprint', 0.2, sp / 7.4);
     else if (sp > 3) m.setLoco('jog', 0.2, sp / 4.5);
     else if (sp > 0.4) m.setLoco('walk', 0.2, Math.max(0.7, sp / 1.6));
-    else if (m.loco !== 'land' || m.loco === 'land') m.setLoco('idle', 0.25);
+    else if (Math.abs(m.proc.yawRate) > 1.4) m.setLoco('walk', 0.25, 0.75); // turning on the spot: small steps instead of foot sliding
+    else m.setLoco('idle', 0.25);
     const armed = this.weapon.def.cls !== 'melee' && !this.inVehicle && !this.swimming && !this.downed && !this.sprinting && !this.freefall;
     const base = armed ? (this.ads > 0.5 || this.w.time - this.lastShotTime < 1.2 ? 'aim' : 'hold') : 'none';
     if (m.upperBase !== base) { m.upperBase = base; if (m.upper === 'none' || m.upper === 'aim' || m.upper === 'hold') m.setUpper(base, 0.18); }

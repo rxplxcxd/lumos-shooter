@@ -122,9 +122,11 @@ void main(){
   #endif
 
   // ---------------------------------------------------------- exponential height fog with sun in-scattering
-  float c0 = fogDensity * exp(-fogFalloff * (camPos.y - fogHeight));
+  // (rd is not normalised: kf is the density falloff over the whole ray; both exponents are clamped
+  // so a camera far above the fog never produces inf * 0)
+  float e1 = clamp(-fogFalloff * (camPos.y - fogHeight), -80.0, 30.0);
   float kf = fogFalloff * rd.y;
-  float integ = abs(kf) > 1e-4 ? c0 * (1.0 - exp(-kf)) / kf : c0;
+  float integ = abs(kf) > 1e-4 ? fogDensity * (exp(e1) - exp(clamp(e1 - kf, -80.0, 30.0))) / kf : fogDensity * exp(e1);
   float fog = 1.0 - exp(-integ * min(dist, cameraFar));
   float mie = pow(max(dot(V, sunDir), 0.0), 7.0);
   vec3 fogCol = fogColor * (1.0 + lightning * 2.5) + sunColor * mie * 0.85;

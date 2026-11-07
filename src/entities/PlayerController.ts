@@ -211,6 +211,19 @@ export class PlayerController {
   private windLoop: ReturnType<GameWorld['audio']['loop']> = null;
   private wasGrounded = true;
   private camDip = 0; private camDipV = 0;
+  private eyeY = 1.65; private eyeInit = false;
+  private headPhase = 0; private headAmp = 0; private breathCam = 0;
+  private hitPitch = 0; private hitPitchV = 0; private hitRoll = 0; private hitRollV = 0;
+  /** camera flinch when the player gets hit (direction-aware) */
+  flinchCam(from: THREE.Vector3 | null, amount: number) {
+    const k = Math.min(1, amount / 35);
+    this.hitPitchV += (0.9 + Math.random() * 0.6) * k;
+    if (from) {
+      const to = from.clone().sub(this.soldier.pos);
+      const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+      this.hitRollV += -Math.sign(to.dot(right) || 1) * 1.6 * k;
+    } else this.hitRollV += (Math.random() - 0.5) * 2 * k;
+  }
 
   // ----------------------------------------------------------------- firing
   private handleFire(dt: number) {
@@ -433,7 +446,7 @@ export class PlayerController {
       cam.updateProjectionMatrix();
       return;
     }
-    if (this.inPlane) return; // mode drives the camera
+    if (this.inPlane) { s.model.setVisible(false); this.vm.visible = false; return; } // mode drives the camera
     const eye = s.eyePos(new THREE.Vector3());
     const fov = this.adsFovTarget;
     const airK = s.freefall ? Math.min(1, s.glideSpeed / 75) * (s.parachute ? 0.3 : 1) : 0;
@@ -455,12 +468,35 @@ export class PlayerController {
       s.model.setVisible(true);
       this.vm.visible = false;
     } else {
-      cam.position.copy(eye);
+      // smooth eye height (crouch / slide / stand transitions instead of snapping)
+      this.eyeY = this.eyeInit ? THREE.MathUtils.lerp(this.eyeY, eye.y - s.pos.y, Math.min(1, dt * 11)) : eye.y - s.pos.y;
+      this.eyeInit = true;
+      cam.position.set(eye.x, s.pos.y + this.eyeY, eye.z);
       cam.position.y += this.camDip * 0.06;
-      cam.quaternion.setFromEuler(rot);
+      // footstep-phased head bob: the head dips on every step, sways sideways, rolls a little when sprinting
+      const hsp = Math.hypot(s.vel.x, s.vel.z);
+      const onFoot = s.grounded && !s.swimming && !s.inVehicle && hsp > 0.3;
+      const stride = s.sprinting ? 1.05 : s.crouching ? 0.55 : 0.78;
+      if (onFoot) this.headPhase += (hsp * dt / stride) * Math.PI;
+      const amp = settings.data.headBob ? (onFoot ? Math.min(1, hsp / 4) : 0) * (1 - s.ads * 0.85) : 0;
+      this.headAmp += (amp - this.headAmp) * Math.min(1, dt * 6);
+      const A = this.headAmp, sprint = s.sprinting ? 1 : 0;
+      const right = new THREE.Vector3(1, 0, 0).applyEuler(rot);
+      cam.position.y -= Math.abs(Math.sin(this.headPhase)) * (0.022 + sprint * 0.018) * A;
+      cam.position.addScaledVector(right, Math.sin(this.headPhase) * (0.011 + sprint * 0.012) * A);
+      // idle breathing
+      this.breathCam += dt;
+      if (settings.data.headBob) cam.position.y += Math.sin(this.breathCam * 1.6) * 0.0025 * (1 - A);
+      const bobRot = rot.clone();
+      bobRot.z += Math.sin(this.headPhase) * 0.0045 * A * (0.4 + sprint) + this.hitRoll;
+      bobRot.x += -Math.abs(Math.cos(this.headPhase)) * 0.0025 * A + this.hitPitch;
+      cam.quaternion.setFromEuler(bobRot);
       s.model.setVisible(false);
       this.vm.visible = !s.downed && !s.freefall;
     }
+    // hit flinch springs
+    this.hitPitchV += (-140 * this.hitPitch - 16 * this.hitPitchV) * dt; this.hitPitch += this.hitPitchV * dt;
+    this.hitRollV += (-120 * this.hitRoll - 14 * this.hitRollV) * dt; this.hitRoll += this.hitRollV * dt;
     // flashlight follows the view
     this.flashlight.position.copy(cam.position);
     this.flashlight.target.position.copy(cam.position).add(this.forward().multiplyScalar(10));

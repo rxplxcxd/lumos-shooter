@@ -12,10 +12,13 @@ const licFor = (url) => Object.entries(LIC).find(([k]) => url.includes(k))?.[1] 
 let md = '# Credits & Asset Licenses\n\nAll 3D models, sounds and music in Lumos Strike come from **Sketchfab** and **itch.io**. Code is original.\n\n';
 md += '## Sketchfab models\n\n| Asset | Title | Author | License |\n|---|---|---|---|\n';
 for (const [path, m] of Object.entries(sf)) md += `| \`${path}\` | [${m.title}](${m.url}) | ${m.author} (@${m.author_username}) | ${m.license} |\n`;
-md += '\nCC Attribution models are used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Models were re-encoded (Draco geometry, WebP textures) and re-scaled for the web; no other changes.\n\n';
+md += '\nCC Attribution models are used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Models were re-encoded (Draco geometry, WebP textures) and re-scaled for the web. The two European Buildings packs were additionally split into their individual buildings and props (scripts/split-scene.mjs → public/assets/kits/euro_a.glb and euro_b.glb); their geometry and textures are otherwise unchanged.\n\n';
 md += '## itch.io packs\n\n| Pack | Used for | License |\n|---|---|---|\n';
 for (const [url, m] of Object.entries(itch)) {
-  const used = /animation|base character/i.test(m.title) ? 'characters & animations' : /cars/i.test(m.title) ? 'vehicles' : /gun/i.test(m.title) ? 'weapons & attachments' : /city|street/i.test(m.title) ? 'city kit' : /nature/i.test(m.title) ? 'trees, rocks, plants' : /music/i.test(m.title) ? 'music' : 'sound effects';
+  const t = m.title;
+  const used = /animation|base character/i.test(t) ? 'characters & animations' : /music/i.test(t) ? 'music'
+    : /weather/i.test(t) ? 'weather & nature ambience (thunder, rain, wind, birds, waves)' : /sound|sfx|noises/i.test(t) ? 'sound effects'
+    : /cars/i.test(t) ? 'vehicles' : /gun/i.test(t) ? 'weapons & attachments' : /city|street/i.test(t) ? 'city kit' : /nature/i.test(t) ? 'trees, rocks, plants' : 'sound effects';
   md += `| [${m.title}](${url}) | ${used} | ${licFor(url)} |\n`;
 }
 md += '\n## Software\n\nthree.js (MIT), Rapier (Apache-2.0), Supabase JS (MIT), Vite (MIT), glTF-Transform (MIT), meshoptimizer (MIT).\n';

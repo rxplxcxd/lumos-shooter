@@ -71,7 +71,7 @@ All 3D models, sounds and music in Lumos Strike come from **Sketchfab** and **it
 | `b_eurobuild2` | [European Buildings Asset Pack 2](https://sketchfab.com/3d-models/european-buildings-asset-pack-2-43bcba64950045d586fd571b46b573f5) | 3DBuilder (@EddyNL) | CC Attribution |
 | `b_eurobuild3` | [European Buildings Asset Pack 3](https://sketchfab.com/3d-models/european-buildings-asset-pack-3-b4fe252345214a3ea1abc834af42944d) | 3DBuilder (@EddyNL) | CC Attribution |
 
-CC Attribution models are used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Models were re-encoded (Draco geometry, WebP textures) and re-scaled for the web; no other changes.
+CC Attribution models are used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Models were re-encoded (Draco geometry, WebP textures) and re-scaled for the web. The two European Buildings packs were additionally split into their individual buildings and props (scripts/split-scene.mjs → public/assets/kits/euro_a.glb and euro_b.glb); their geometry and textures are otherwise unchanged.
 
 ## itch.io packs
 
@@ -96,6 +96,8 @@ CC Attribution models are used under [CC BY 4.0](https://creativecommons.org/lic
 | [Drive & Destroy SFX Lite - 27 Free Car, Crash & Zombie Sounds by Rasterloom](https://rasterloom.itch.io/drive-destroy-sfx-lite) | sound effects | Free for commercial use, no attribution required |
 | [Explosions & Destruction SFX - Free Sample (30 Sounds) + Browser Player by REEBOO Labs](https://reeboolabs.itch.io/explosions-destruction-sfx-free-sample) | sound effects | Royalty-free, credit appreciated |
 | [[Music Assets] FREE Music Loop Bundle by Tallbeard Studios](https://tallbeard.itch.io/music-loop-bundle) | music | CC0 1.0 (Public Domain) |
+| [Free Weather and Nature Sounds - 8 Sound Effects by Outta This World Audio](https://moneywithjjcom.itch.io/free-weather-nature-sounds) | weather & nature ambience (thunder, rain, wind, birds, waves) | Royalty-free, no attribution required |
+| [FREE Game SFX Sampler — 33 Sounds from 12 Packs by Outta This World Audio](https://moneywithjjcom.itch.io/essentials-sampler) | sound effects | Royalty-free, no attribution required |
 
 ## Software
 

@@ -354,13 +354,17 @@ export class Engine {
     return this.renderer.domElement.toDataURL('image/png');
   }
 
-  /** Compile every material up-front (async where KHR_parallel_shader_compile exists) so the first fight does not hitch. */
+  /**
+   * Compile every material of the world and of the view-model overlay (in parallel where
+   * KHR_parallel_shader_compile exists), then render one frame while the loading screen still
+   * covers the canvas, so the fullscreen passes and the draw-time pipeline state are built too.
+   * Without this the first visible frames stall on shader compilation.
+   */
   async warmup() {
     try {
-      const r = this.renderer as THREE.WebGLRenderer & { compileAsync?: (s: THREE.Object3D, c: THREE.Camera) => Promise<unknown> };
-      if (r.compileAsync) await r.compileAsync(this.scene, this.camera);
-      else this.renderer.compile(this.scene, this.camera);
-      this.renderer.compile(this.overlay, this.overlayCam);
+      await this.renderer.compileAsync(this.scene, this.camera);
+      await this.renderer.compileAsync(this.overlay, this.overlayCam);
+      this.render(0);
     } catch { /* older drivers */ }
   }
 }

@@ -42,7 +42,8 @@ Das Spiel läuft **komplett offline**. Supabase, Lumos Cloud und der Echtzeit-Se
   - Loot mit Seltenheits-Lichtsäulen
   - Kaufstationen (Platten, Weste, UAV, Versorgungsabwurf, Teammitglied absetzen, Loadout-Drop)
   - Versorgungsabwürfe, Down-State und Wiederbeleben, Death Crates, Platzierung
-  - **Lumos City** als echtes Straßenraster: Fahrbahnen mit Zebrastreifen, Gehwege mit Bordsteinen, Ampeln, Bushaltestellen, Bänke, Hydranten, Parkuhren, Müllcontainer und Bäume. Straßenlaternen und Fenster gehen in der Dämmerung an, bei Regen glänzen die Straßen, aus Gullys steigt Dampf
+  - **Lumos City** als echtes Straßenraster: Fahrbahnen mit Zebrastreifen, Gehwege mit Bordsteinen, Ampeln, Verkehrsschilder, Bushaltestellen, Bänke, Hydranten, Parkuhren, Müllcontainer, Pflanzkübel, Baustellen und Bäume. Straßenlaternen (einige flackern) und Fenster gehen in der Dämmerung an, bei Regen spiegeln die Straßen, aus Gullys und Schornsteinen steigt Rauch
+  - **Altstadt** aus europäischen Backstein- und Giebelhäusern mit Rathaus, Eckläden und historischen Laternen, dazu ein **Stadtpark** mit Musikpavillon, Pavillons, Blumenbeeten, Trittsteinwegen und schmiedeeisernem Zaun. Am Hafen steht ein Bahnhof, am Flugfeld eine Glas-Arkade, auf dem Land Villa und Herrenhaus
   - Mülltonnen, Container und Paletten sind Physik-Objekte, die Autos, Schüsse und Explosionen umwerfen
 - **Zombie Royale**: Battle Royale mit Zombie-Horden an den POIs. Gefallene Spieler erheben sich wieder.
 - **Multiplayer** auf der 3-Lane-Map „Crossroads“: Team Deathmatch, Free-for-All, Capture the Flag und Search & Destroy. Mit taktischen Respawns, Scorestreaks (UAV, Care Package, Cluster Strike) und einer optionalen Nachtkarte mit Nachtsicht.
@@ -56,12 +57,23 @@ Das Spiel läuft **komplett offline**. Supabase, Lumos Cloud und der Echtzeit-Se
 
 ## Release-Candidate-Features
 
+- **Echte Killcam**: Das Spiel zeichnet die letzten 9 Sekunden ständig in einem Ringpuffer auf (Positionen, Blickrichtung, Animationen, Waffen, Fahrzeuge, Schüsse, Einschläge, Explosionen und Sounds). Nach dem Tod läuft die Wiederholung aus der Sicht des Killers mit seinem Waffenmodell, Mündungsfeuer und Rückstoß, der tödliche Treffer in Zeitlupe. Mit Sprung oder Interagieren überspringen.
 - **Ping-System**: Z / mittlere Maustaste / Steuerkreuz ↑. Kontextabhängig: Feind unter dem Fadenkreuz, Fahrzeug, Loot oder Ort, doppelt tippen = Gefahr. Marker in der Welt, am Bildschirmrand und auf der Minimap, wird im Team übers Netz geteilt, KI-Teammitglieder laufen zum Ping.
 - **Medaillen**: Doppel-/Triple-/Multi-Kill, Serien, First Blood, Kopfschuss, Weitschuss, Rache, Kollateral, Überlebenskünstler und mehr, jeweils mit Bonus-XP.
 - **Schadenszahlen** über getroffenen Gegnern (stapeln sich pro Ziel, gelb = Kopf, blau = Rüstung), abschaltbar in den Einstellungen.
 - **Match-Statistik** am Ende: Kills, Schaden, Kopftreffer, Trefferquote, weitester Kill, Strecke zu Fuß und im Fahrzeug, Überlebenszeit, Medaillen.
 - **Fotomodus** (Pausenmenü): freie Kamera, FOV und Neigung, Filter (Kino, Noir, Lebendig, Vintage, Nachtsicht, Wärmebild), Kinobalken und PNG-Screenshot.
 - **Visier-Kalibrierung**: Für jede Waffe wird die Visierlinie aus der Modellgeometrie berechnet (Kimme/Korn, Lochkimmen werden erkannt). Bei Zielfernrohren, 3,5x- und Wärmebild-Optiken verschwindet das Waffenmodell beim Zielen vollständig, das Okular mit Absehen und Parallaxe-Schatten übernimmt.
+
+## Grafik, Wetter und Atmosphäre
+
+- **Atmosphären-Pass** (ab Medium, SSR-Schritte und Godray-Samples skalieren mit der Qualitätsstufe) auf dem Tiefenpuffer: Screen-Space-Reflections auf nassen Straßen und Pfützen (Raymarching mit Verfeinerung, rauigkeitsabhängige Unschärfe), exponentieller Höhennebel mit Sonnen-Streuung, Godrays durch Wolkenlücken und an Gebäudekanten, Blitz-Aufhellung
+- **PBR-Materialien**: Metall/Rauigkeit pro Materialklasse abgestimmt, Lack mit Klarlack-Schicht auf Fahrzeugen (High/Ultra), Umgebungsreflexionen aus dem Himmel
+- **Dynamisches Wetter** mit fließenden Übergängen: Sonnig, Bewölkt, Bedeckt, Nebel, Nieselregen, Regen, Gewitter und Hagel. Die Vorhersage folgt plausiblen Übergängen und wird aus dem Match-Seed erzeugt, ist online also für alle gleich. Dazu GPU-Regen und Hagel, Straßen, die nass werden und langsam wieder trocknen, Regentropfen auf dem Bildschirm bzw. Visier (nicht in geschlossenen Fahrzeugen), Blitze mit verzögertem Donner nach Entfernung, Windböen und eine prozedurale Regen- und Windgeräuschkulisse
+- **Tag-Nacht-Zyklus**: Sternenhimmel mit Milchstraße, Mond mit Phasen und Mondlicht, warme Dämmerung, Straßenlaternen, die nacheinander angehen, leuchtende Fenster und eine weiche Taschenlampe bei Nacht
+- **Lebendige Welt**: Vögel, die bei Schüssen auffliegen, Glühwürmchen nachts, Blätter, Staub und Müll bei Wind, Schornstein- und Gullyrauch, Funken. Die Kirchenglocke schlägt zur vollen Stunde, dazu Vogelgesang, Eulen und Brandung
+- **Animationen**: realistisches Head-Bobbing im Schrittrhythmus inkl. Atmen (abschaltbar unter Einstellungen → Kopfbewegung), Kamera-Zucken bei Treffern aus der Trefferrichtung, Taumeln bei schweren Treffern, Schrittanimation beim Drehen auf der Stelle
+- **Kollisionen**: Gebäude, Bordsteine, Pflanzkübel, Laternen und Schilder haben passgenaue Kollider, Fahrzeuge fahren über Bordsteine und stoppen an Fassaden, Loot liegt immer auf dem Boden statt in Dächern
 
 ## Fahrzeuge (30, alle fahr-, flieg- oder schwimmbar)
 
@@ -106,20 +118,21 @@ Die Landfahrzeuge nutzen Rapier-Raycast-Räder, Wasserfahrzeuge haben Auftrieb a
 
 ```
 src/
-  core/      Engine (Loop, Fixed-Step, Dynamic Resolution Scaling, Post-FX NVG/Thermal/Unterwasser), Settings, Events
+  core/      Engine (Loop, Fixed-Step, Dynamic Resolution Scaling, Post-FX-Kette, Grading NVG/Thermal/Unterwasser/Replay), Settings, Events
+  fx/        AtmospherePass (SSR, Höhennebel, Godrays), Precipitation (GPU-Regen/Hagel), Effects (Partikel, Decals, Trümmer)
   assets/    AssetManager (Draco, Meshopt, KTX2, Lumos-CDN-Routing mit lokalem Fallback), Manifest + Normalisierung
   physics/   Rapier-Wrapper (Heightfield, Trimesh, Character Controller, Raycasts)
   input/     Tastatur/Maus, Gamepad API, Touch, Gyro, Haptik, Button-Glyphen
   audio/     Web Audio: HRTF-3D-Sound, vertikale Dämpfung, Engine-Loops, Musik-Crossfade
-  world/     Terrain (Insel-Heightmap), Wasser, Himmel / Tag-Nacht / Wetter, Karten, Static Batching, Instanced Scatter + LOD
+  world/     Terrain (Insel-Heightmap), Wasser, Himmel / Tag-Nacht, dynamisches Wetter, Stadt (Raster, Altstadt, Park), Straßenlicht, Ambient Life, Karten, Static Batching, Instanced Scatter + LOD
   entities/  CharacterModel (Layered Animation: Unter-/Oberkörper), Soldier, PlayerController, BotBrain (Utility-KI), Zombie + Flow-Field-NavGrid
   weapons/   17 Waffen, 12 Gunsmith-Aufsätze (3D am Modell), Projektil-Ballistik mit Fall, Durchschuss, Granaten
   vehicles/  30 Fahrzeugdefinitionen + Fahrzeugphysik (Land / Wasser / Luft)
-  gameplay/  GameWorld, Mode-Basis, Loot, Modi (BattleRoyale, Multiplayer, Zombies)
+  gameplay/  GameWorld, Mode-Basis, Loot, Replay (Ringpuffer + Killcam), Modi (BattleRoyale, Multiplayer, Zombies)
   ui/        Menü (Lobby 3D, Gunsmith, Operator, Battle Pass, Kisten, Karriere, Einstellungen), HUD, Touch
   net/       Backend (Lumos Cloud → Supabase → lokal), Profil/Progression, NetClient (WebSocket)
 server/      WebSocket-Relay (Party-Räume per Code, Host-Migration, State/Snapshots/Events, Hits mit Clamping, Rate-Limit)
-scripts/     Asset-Pipeline: process-assets, build-kit, build-characters, inspect-assets, build-credits
+scripts/     Asset-Pipeline: process-assets, build-kit, build-pack-kit, build-lod, split-scene, build-characters, inspect-assets, build-credits
 supabase/    schema.sql (profiles, matches, friends, party_invites + RLS)
 ```
 
@@ -131,7 +144,7 @@ supabase/    schema.sql (profiles, matches, friends, party_invites + RLS)
 - Straßenlaternen: nur die nächsten Lampen bekommen echte Punktlichter, alle anderen leuchten über einen einzigen Glow-Draw-Call
 - Animations-LOD (entfernte Charaktere werden seltener aktualisiert), Physik-LOD für entfernte Bots
 - Lambert-Materialien auf Low-Spec, Draco-Geometrie, WebP-Texturen (max. 1024 px)
-- Shader-Warm-up vor dem Match
+- Shader-Warm-up hinter dem Ladebildschirm (alle Materialien inkl. Waffenmodell, ein Probe-Frame für die Fullscreen-Pässe), feste Lichteranzahl, damit Laternen beim Näherkommen keine Shader-Neukompilierung auslösen
 
 ## Backend und Schlüssel
 
@@ -151,5 +164,9 @@ node scripts/build-kit.mjs public/assets/kits/nature.glb --tex 512 <gltf...>
 node scripts/build-characters.mjs UAL1.glb UAL2.glb public/assets/characters mannequin=...
 node scripts/build-pack-kit.mjs cityprops.glb public/assets/kits/cityprops.glb --tex 512 --group "BusStop=BusStop_*"
 node scripts/build-lod.mjs public/assets/kits/nature.glb public/assets/kits/nature_lod2.glb 0.03 0.4
+# zusammengefügte Szenen (z. B. die European-Buildings-Pakete) in einzeln platzierbare Gebäude zerlegen:
+# flacht die Hierarchie ab, gruppiert Meshes über überlappende Grundrisse, entfernt Bodenplatten,
+# zentriert jedes Teil (Grundfläche auf y = 0) und benennt es; --report listet die gefundenen Teile
+node scripts/split-scene.mjs eurobuild2.glb public/assets/kits/euro_a.glb --prefix eb2 --tol 0.3 --tex 1024 --keep "eb2_08=TownHall,eb2_15=BrickHouse_A,..."
 npm run assets:credits
 ```

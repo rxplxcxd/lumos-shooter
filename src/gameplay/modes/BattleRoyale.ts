@@ -81,7 +81,8 @@ export class BattleRoyale extends SoldierMode {
     for (const poi of this.map.pois.filter((p) => p.tier >= 2)) this.addBuyStation(new THREE.Vector3(poi.x + 8, poi.h, poi.z + 8));
     // storm visual
     this.stormMesh = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 400, 96, 1, true), new THREE.ShaderMaterial({
-      transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      // writes depth so the atmosphere pass fogs it by its own distance (and never through it)
+      transparent: true, depthWrite: true, side: THREE.DoubleSide,
       uniforms: { time: { value: 0 } },
       vertexShader: 'varying vec2 vUv; varying vec3 vW; void main(){ vUv = uv; vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
       fragmentShader: 'uniform float time; varying vec2 vUv; varying vec3 vW; void main(){ float s = 0.5 + 0.5 * sin(vUv.x * 200.0 + time * 2.0 + vUv.y * 20.0); float a = 0.35 + 0.15 * s; gl_FragColor = vec4(0.55, 0.15, 0.85, a * smoothstep(1.0, 0.6, vUv.y)); }',
@@ -106,6 +107,7 @@ export class BattleRoyale extends SoldierMode {
     pc.inPlane = true;
     this.inFlight.add(pc.soldier);
     pc.soldier.frozen = true;
+    pc.soldier.hidden = true;
     pc.soldier.collider?.setEnabled(false);
     pc.soldier.weapons = [null, null];
     pc.soldier.current = 2;
@@ -117,6 +119,7 @@ export class BattleRoyale extends SoldierMode {
       b.s.model.setVisible(false);
       this.inFlight.add(b.s);
       b.s.frozen = true;
+      b.s.hidden = true;
       this.botDrop.set(b.s, 0.1 + this.rng.next() * 0.8);
       const target = this.rng.pick(this.map.pois);
       b.dropTarget = new THREE.Vector3(target.x + this.rng.range(-target.r, target.r) * 0.7, 0, target.z + this.rng.range(-target.r, target.r) * 0.7);
@@ -225,6 +228,7 @@ export class BattleRoyale extends SoldierMode {
   private dropSoldier(s: Soldier) {
     this.inFlight.delete(s);
     s.frozen = false;
+    s.hidden = false;
     s.pos.copy(this.plane!.position).add(new THREE.Vector3(0, -6, 0));
     s.vel.set(0, -5, 0);
     s.freefall = true;

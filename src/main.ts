@@ -136,7 +136,9 @@ class App {
       this.quitMatch();
       return;
     }
-    // party: AI squad mates take the invited slots in BR
+    // build all shaders behind the loading screen (no hitches once the match is visible)
+    this.loading(true, 0.995, 'Shader werden vorbereitet…');
+    await this.engine.warmup();
     this.loading(false);
     this.hud = new HUD(w, this.ui);
     this.hud.onQuit = () => this.quitMatch();
@@ -145,7 +147,6 @@ class App {
     this.hud.onPhoto = () => photo.enter();
     photo.onExit = () => this.setPaused(true);
     if (TouchControls.wanted()) { this.touch = new TouchControls(this.input, this.ui); }
-    this.engine.warmup();
     this.engine.onFixed((dt) => w.fixedUpdate(dt));
     let resultApplied = false;
     this.engine.onUpdate((dt) => {

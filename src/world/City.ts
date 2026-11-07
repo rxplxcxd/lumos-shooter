@@ -18,6 +18,10 @@ import { QUALITY_PRESETS, settings } from '../core/Settings';
  */
 export interface CityInfo {
   lamps: THREE.Vector3[];
+  /** church / town-hall bell towers (hourly chimes) */
+  bells: THREE.Vector3[];
+  /** chimney tops (smoke) */
+  chimneys: THREE.Vector3[];
   /** road ends at the city boundary (for connecting country roads) */
   exits: [number, number][];
   parking: { x: number; z: number; yaw: number }[];
@@ -34,7 +38,7 @@ export async function buildCity(mb: MapBuilder, cx: number, cz: number, h: numbe
   const q = QUALITY_PRESETS[settings.data.quality];
   const lowQ = q.lowSpecMaterials;
   const detail = settings.data.quality === 'potato' ? 0 : settings.data.quality === 'low' ? 0.35 : settings.data.quality === 'medium' ? 0.7 : 1;
-  const info: CityInfo = { lamps: [], exits: [], parking: [] };
+  const info: CityInfo = { lamps: [], exits: [], parking: [], bells: [], chimneys: [] };
   const yBase = h - 0.1;
 
   // ------------------------------------------------------------------ roads
@@ -48,7 +52,7 @@ export async function buildCity(mb: MapBuilder, cx: number, cz: number, h: numbe
     for (let i = 0; i < n; i++) {
       const t = (i + 0.5) / n;
       await mb.place('kit:city:Street_4Lane', x0 + (x1 - x0) * t, z0 + (z1 - z0) * t, alongX ? 0 : Math.PI / 2,
-        { y: yBase, scaleV: new THREE.Vector3(ROAD_S * k * 1.01, ROAD_S, ROAD_S), collider: 'none', batch: roads });
+        { y: yBase + (i % 2) * 0.002, scaleV: new THREE.Vector3(ROAD_S * k, ROAD_S, ROAD_S), collider: 'none', batch: roads });
     }
     // manholes + storm drains along the run
     if (detail > 0.3) {
@@ -56,11 +60,11 @@ export async function buildCity(mb: MapBuilder, cx: number, cz: number, h: numbe
         const t = i / (Math.floor(len / 24) + 1);
         const x = x0 + (x1 - x0) * t, z = z0 + (z1 - z0) * t;
         const lane = (R.chance(0.5) ? 1 : -1) * ROAD_HW * 0.45;
-        await mb.place('kit:cityprops:Manhole', x + (alongX ? 0 : lane), z + (alongX ? lane : 0), R.next() * 6, { y: h + 0.025, collider: 'none', batch: roads });
+        await mb.place('kit:cityprops:Manhole', x + (alongX ? 0 : lane), z + (alongX ? lane : 0), R.next() * 6, { y: h + 0.045, collider: 'none', batch: roads });
         if (R.chance(0.3)) w.lights?.steam.push(new THREE.Vector3(x + (alongX ? 0 : lane), h + 0.05, z + (alongX ? lane : 0)));
         if (detail >= 1 && i === 1) {
           const side = R.chance(0.5) ? 1 : -1;
-          await mb.place('kit:cityprops:Drain', x + (alongX ? 3 : side * (ROAD_HW - 0.8)), z + (alongX ? side * (ROAD_HW - 0.8) : 3), alongX ? 0 : Math.PI / 2, { y: h + 0.025, collider: 'none', batch: roads });
+          await mb.place('kit:cityprops:Drain', x + (alongX ? 3 : side * (ROAD_HW - 0.8)), z + (alongX ? side * (ROAD_HW - 0.8) : 3), alongX ? 0 : Math.PI / 2, { y: h + 0.045, collider: 'none', batch: roads });
         }
       }
     }
@@ -81,7 +85,7 @@ export async function buildCity(mb: MapBuilder, cx: number, cz: number, h: numbe
   }
   for (const ox of offs) for (const oz of offs) {
     const ix = cx + ox, iz = cz + oz;
-    await mb.place('kit:city:Street_4WayIntersection', ix, iz, 0, { y: yBase, scale: ROAD_S, collider: 'none', batch: roads });
+    await mb.place('kit:city:Street_4WayIntersection', ix, iz, 0, { y: yBase + 0.006, scale: ROAD_S, collider: 'none', batch: roads });
     // traffic lights on two diagonal corners, facing the approaching lanes
     if (detail > 0) {
       for (const [sx, sz] of [[1, 1], [-1, -1]] as const) {
@@ -127,13 +131,14 @@ export async function buildCity(mb: MapBuilder, cx: number, cz: number, h: numbe
     const n = Math.max(2, Math.round((2 * half) / 3.6));
     const t = (2 * half) / n;
     const sv = new THREE.Vector3(t / 3, (CURB + 0.1) / 0.15, t / 3);
+    const paved = plaza || kind === 'modern' || kind === 'oldtown';
     for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
       const ring = i === 0 || j === 0 || i === n - 1 || j === n - 1;
-      if (!ring && !plaza) continue;
+      if (!ring && !paved) continue;
       await mb.place(tile, bx - half + (i + 0.5) * t, bz - half + (j + 0.5) * t, 0, { y: yBase, scaleV: sv, collider: 'none', batch: g });
     }
     const top = h + CURB;
-    if (plaza) w.physics.addBox(new THREE.Vector3(bx, top - 0.14, bz), new THREE.Vector3(half, 0.14, half));
+    if (paved) w.registerSurface(w.physics.addBox(new THREE.Vector3(bx, top - 0.14, bz), new THREE.Vector3(half, 0.14, half)), 'stone');
     else for (const [dx, dz, hx, hz] of [[0, half - t / 2, half, t / 2], [0, -half + t / 2, half, t / 2], [half - t / 2, 0, t / 2, half - t], [-half + t / 2, 0, t / 2, half - t]]) {
       const c = w.physics.addBox(new THREE.Vector3(bx + dx, top - 0.14, bz + dz), new THREE.Vector3(hx, 0.14, hz));
       w.registerSurface(c, 'stone');
@@ -169,7 +174,10 @@ export async function buildCity(mb: MapBuilder, cx: number, cz: number, h: numbe
         }
         const p = at(u, 0.9);
         await mb.place('kit:city:Prop_Planter_Single', p.x, p.z, 0, { y: top, scale: 0.8, collider: 'box', surface: 'stone', batch: g });
-        if (detail > 0.3) tree(R.pick(['CommonTree_1', 'CommonTree_2', 'CommonTree_4']), p.x, top + 0.4, p.z, 0.55 + R.next() * 0.2, false);
+        if (detail > 0.3) {
+          if (R.chance(0.72)) tree(R.pick(['CommonTree_1', 'CommonTree_2', 'CommonTree_4']), p.x, top + 0.4, p.z, 0.55 + R.next() * 0.2, false);
+          else tree(R.pick(['Bush_Common_Flowers', 'Bush_Common']), p.x, top + 0.45, p.z, 0.75, false);
+        }
       }
       if (detail < 0.3) continue;
       // parking meters along two sides, hydrant + post box / benches
@@ -188,6 +196,18 @@ export async function buildCity(mb: MapBuilder, cx: number, cz: number, h: numbe
         await w.knock?.add('cityprops', R.pick(['TrashCanLarge', 'TrashCanSmall', 'TrashCommercial', 'TrashCanCap']), new THREE.Vector3(b.x, top, b.z), R.next() * 6, 1, 35);
       }
       if (R.chance(0.35)) { const p = at(half * 0.2, 2.6); await mb.place('kit:cityprops:PostBox', p.x, p.z, faceRoad, { y: top, collider: 'box', surface: 'metal', batch: props }); }
+      // traffic signs near the corners (stop / no parking / give way)
+      if (detail > 0.3) {
+        const sgn = R.pick(['Sign_Stop', 'Sign_NoParking', 'Sign_Triangle', 'Sign_NoParking']);
+        const p = at(half * (R.chance(0.5) ? 0.9 : -0.9), 0.2);
+        await mb.place(`kit:street:${sgn}`, p.x, p.z, faceRoad + (sgn === 'Sign_Stop' ? Math.PI / 2 : 0), { y: top, scale: 5.5, collider: 'pole', surface: 'metal', batch: props });
+      }
+      // more bins along the curb (physics props: they fly when a car clips the sidewalk)
+      if (detail > 0.6) for (const u of [-half * 0.72, half * 0.55]) {
+        if (!R.chance(0.55)) continue;
+        const p = at(u, 0.5);
+        await w.knock?.add('cityprops', R.pick(['TrashCanLarge', 'TrashCanSmall', 'TrashCommercial']), new THREE.Vector3(p.x, top, p.z), R.next() * 6, 1, 30);
+      }
       // parked car along this curb (outer lane)
       if (info.parking.length < 14 && R.chance(0.45)) {
         const along = nz !== 0 ? Math.PI / 2 : 0;
@@ -223,21 +243,22 @@ export async function buildCity(mb: MapBuilder, cx: number, cz: number, h: numbe
         if (detail > 0.3) await mb.place('kit:cityprops:ParkBenchLong', bx + Math.cos(a) * r * 0.82, bz + Math.sin(a) * r * 0.82, -a, { y: top, collider: 'box', surface: 'wood', batch: props });
       }
     } else if (kind === 'oldtown') {
-      await oldTownBlock(mb, bx, bz, half - t - 0.15, h, R, g, props, info, bi === 0 && bj === 1, detail);
+      await oldTownBlock(mb, bx, bz, half - t + 0.05, h, R, g, props, info, bi === 0 && bj === 1, detail);
     } else if (kind === 'park') {
       await parkBlock(mb, bx, bz, half - t, h, R, g, props, info, tree, detail);
     } else {
       const quads: [number, number][] = [[1, 1], [-1, 1], [1, -1], [-1, -1]];
+      const ly = top; // paved lot
       const parkQ = R.chance(0.3) ? R.int(0, 3) : -1;
       for (let qi = 0; qi < 4; qi++) {
         const [sx, sz] = quads[qi];
         if (qi === parkQ) {
           // pocket park: trees, bench, lamp
           const px = bx + sx * lot * 0.5, pz = bz + sz * lot * 0.5;
-          if (detail > 0) for (let k = 0; k < 4; k++) tree(R.pick(['CommonTree_1', 'CommonTree_3', 'CommonTree_2', 'Bush_Common']), px + R.range(-6, 6), h, pz + R.range(-6, 6), 0.8 + R.next() * 0.4);
-          await mb.place('kit:cityprops:Light', px, pz, 0, { y: h, collider: 'box', surface: 'metal', batch: g });
-          info.lamps.push(new THREE.Vector3(px, h + 4.1, pz));
-          if (detail > 0.3) await mb.place('kit:cityprops:ParkBenchShort', px + 2, pz, Math.PI / 2, { y: h, collider: 'box', surface: 'wood', batch: props });
+          if (detail > 0) for (let k = 0; k < 4; k++) tree(R.pick(['CommonTree_1', 'CommonTree_3', 'CommonTree_2', 'Bush_Common']), px + R.range(-6, 6), ly, pz + R.range(-6, 6), 0.8 + R.next() * 0.4);
+          await mb.place('kit:cityprops:Light', px, pz, 0, { y: ly, collider: 'box', surface: 'metal', batch: g });
+          info.lamps.push(new THREE.Vector3(px, ly + 4.1, pz));
+          if (detail > 0.3) await mb.place('kit:cityprops:ParkBenchShort', px + 2, pz, Math.PI / 2, { y: ly, collider: 'box', surface: 'wood', batch: props });
           continue;
         }
         const id = R.pick(tall);
@@ -253,21 +274,30 @@ export async function buildCity(mb: MapBuilder, cx: number, cz: number, h: numbe
         fx *= k; fz *= k;
         const x = bx + sx * (lot - fx / 2), z = bz + sz * (lot - fz / 2);
         if (swapLod && id.startsWith('kit:city:')) {
-          await mb.place(id, x, z, yaw, { y: h - 0.05, scale: k < 1 ? k : undefined, surface: 'stone', loot: 3, batch: near });
-          await mb.place(id.replace('kit:city:', 'kit:city_lod:'), x, z, yaw, { y: h - 0.05, scale: k < 1 ? k : undefined, collider: 'none', batch: far });
-        } else await mb.place(id, x, z, yaw, { y: h - 0.05, scale: k < 1 ? k : undefined, surface: 'stone', loot: 3, batch: g });
+          await mb.place(id, x, z, yaw, { y: ly - 0.03, scale: k < 1 ? k : undefined, surface: 'stone', loot: 3, batch: near });
+          await mb.place(id.replace('kit:city:', 'kit:city_lod:'), x, z, yaw, { y: ly - 0.03, scale: k < 1 ? k : undefined, collider: 'none', batch: far });
+        } else await mb.place(id, x, z, yaw, { y: ly - 0.03, scale: k < 1 ? k : undefined, surface: 'stone', loot: 3, batch: g });
+      }
+      // construction site in one corner of some blocks: barriers, pallets, tarps, rubble
+      if (detail > 0.3 && R.chance(0.35)) {
+        const [sx, sz] = R.pick(quads);
+        const cxs = bx + sx * (lot - 3.2), czs = bz + sz * (lot * 0.45);
+        await mb.place('kit:cityprops:PostBarrier', cxs, czs, Math.PI / 2, { y: ly, collider: 'box', surface: 'metal', batch: props });
+        await mb.place('env_barrier', cxs - sx * 2.5, czs + 4, 0, { y: ly, collider: 'box', surface: 'stone', batch: props });
+        for (let k = 0; k < 3; k++) await w.knock?.add('cityprops', R.pick(['pallet1', 'pallet2']), new THREE.Vector3(cxs - sx * R.range(1, 4), ly + k * 0.15, czs - R.range(-3, 3)), R.next() * 6, 1, 20);
+        for (let k = 0; k < 4; k++) await mb.place(`kit:nature:${R.pick(['Rock_Medium_1', 'Rock_Medium_2', 'Pebble_Round_1'])}`, cxs - sx * R.range(0, 5), czs + R.range(-4, 4), R.next() * 6, { y: ly - 0.2, scale: 0.35 + R.next() * 0.4, collider: 'none', batch: props });
       }
       // alley clutter (cross-shaped gap between the buildings)
       if (detail > 0.3) {
-        const nAlley = 2 + Math.round(detail * 3);
+        const nAlley = 3 + Math.round(detail * 4);
         for (let k = 0; k < nAlley; k++) {
           const alongX = R.chance(0.5);
           const u = R.range(-lot * 0.8, lot * 0.8);
           const x = bx + (alongX ? u : R.range(-0.6, 0.6)), z = bz + (alongX ? R.range(-0.6, 0.6) : u);
           const kind = R.pick(['Dumpster', 'Dumpster', 'TarpCrates', 'pallet1', 'TrashCanCap', 'Utility']);
-          if (kind === 'Dumpster') await w.knock?.add('cityprops', 'Dumpster', new THREE.Vector3(x, h, z), alongX ? 0 : Math.PI / 2, 1, 260);
-          else if (kind === 'pallet1' || kind === 'TrashCanCap') await w.knock?.add('cityprops', kind, new THREE.Vector3(x, h, z), R.next() * 6, 1, kind === 'pallet1' ? 20 : 30);
-          else await mb.place(`kit:cityprops:${kind}`, x, z, alongX ? 0 : Math.PI / 2, { y: h, collider: 'box', surface: kind === 'Utility' ? 'metal' : 'wood', batch: props });
+          if (kind === 'Dumpster') await w.knock?.add('cityprops', 'Dumpster', new THREE.Vector3(x, ly, z), alongX ? 0 : Math.PI / 2, 1, 260);
+          else if (kind === 'pallet1' || kind === 'TrashCanCap') await w.knock?.add('cityprops', kind, new THREE.Vector3(x, ly, z), R.next() * 6, 1, kind === 'pallet1' ? 20 : 30);
+          else await mb.place(`kit:cityprops:${kind}`, x, z, alongX ? 0 : Math.PI / 2, { y: ly, collider: 'box', surface: kind === 'Utility' ? 'metal' : 'wood', batch: props });
         }
       }
     }
@@ -350,15 +380,22 @@ async function oldTownBlock(mb: MapBuilder, bx: number, bz: number, lot: number,
       const cu = u + wS / 2; u += wS;
       const x = bx + nx * (lot - depth / 2) + (ns ? cu : 0), z = bz + nz * (lot - depth / 2) + (ns ? 0 : cu);
       const sv = p === 'TownHall' ? new THREE.Vector3(depth / d.d, 1, k) : new THREE.Vector3(k, 1, depth / d.d);
-      await mb.place(`kit:euro_a:${p}`, x, z, p === 'TownHall' ? faceYaw - Math.PI / 2 : faceYaw, { y: h - 0.05, scaleV: sv, surface: 'stone', loot: p === 'TownHall' ? 4 : 2, batch: g });
+      // facades stand on the sidewalk (no sunken strip in front of the doors)
+      await mb.place(`kit:euro_a:${p}`, x, z, p === 'TownHall' ? faceYaw - Math.PI / 2 : faceYaw, { y: h + CURB - 0.03, scaleV: sv, surface: 'stone', loot: p === 'TownHall' ? 4 : 2, batch: g });
+      if (p === 'TownHall') info.bells.push(new THREE.Vector3(x, h + 16, z));
+      // chimneys: back half of the roof ridge of the narrow / brick houses
+      if ((p === 'NarrowHouse' || p === 'BrickHouse_B' || p === 'DutchRow') && R.chance(0.6)) {
+        const sz = sizes.get(p)!;
+        info.chimneys.push(new THREE.Vector3(x - nx * depth * 0.15, h + sz.y - 0.3, z - nz * depth * 0.15));
+      }
     }
   }
   // closed courtyard behind the rows: a few trees and junk (seen from rooftops / windows)
   if (detail > 0.3) {
     const inner = lot - depthMax;
     if (inner > 3) {
-      await mb.w.knock?.add('cityprops', 'Dumpster', new THREE.Vector3(bx + R.range(-inner + 2, inner - 2), h, bz + R.range(-inner + 2, inner - 2)), R.next() * 6, 1, 260);
-      await mb.place('kit:cityprops:TarpCrates', bx + R.range(-inner + 2, inner - 2), bz + R.range(-inner + 2, inner - 2), R.next() * 6, { y: h, collider: 'box', surface: 'wood', batch: props });
+      await mb.w.knock?.add('cityprops', 'Dumpster', new THREE.Vector3(bx + R.range(-inner + 2, inner - 2), h + CURB, bz + R.range(-inner + 2, inner - 2)), R.next() * 6, 1, 260);
+      await mb.place('kit:cityprops:TarpCrates', bx + R.range(-inner + 2, inner - 2), bz + R.range(-inner + 2, inner - 2), R.next() * 6, { y: h + CURB, collider: 'box', surface: 'wood', batch: props });
     }
   }
   void info;

@@ -196,5 +196,27 @@
   "source": "itch.io",
   "title": "[Music Assets] FREE Music Loop Bundle by Tallbeard Studios",
   "url": "https://tallbeard.itch.io/music-loop-bundle"
+ },
+ "https://moneywithjjcom.itch.io/free-weather-nature-sounds": {
+  "title": "Free Weather and Nature Sounds - 8 Sound Effects by Outta This World Audio",
+  "url": "https://moneywithjjcom.itch.io/free-weather-nature-sounds",
+  "files": [
+   "free-weather-nature-sounds-audio.zip"
+  ],
+  "license_mentions": [
+   "royalty-free, no attribution required (see pack README)"
+  ],
+  "source": "itch.io"
+ },
+ "https://moneywithjjcom.itch.io/essentials-sampler": {
+  "title": "FREE Game SFX Sampler \u2014 33 Sounds from 12 Packs by Outta This World Audio",
+  "url": "https://moneywithjjcom.itch.io/essentials-sampler",
+  "files": [
+   "essentials-sampler-audio.zip"
+  ],
+  "license_mentions": [
+   "royalty-free, no attribution required (see pack README)"
+  ],
+  "source": "itch.io"
  }
 }

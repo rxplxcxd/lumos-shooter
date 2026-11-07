@@ -63,8 +63,12 @@ export class MapBuilder {
     let collider = null;
     if (col === 'mesh') collider = this.w.physics.addStaticMesh(obj, 12000);
     else if (col === 'box') {
+      // oriented box: measure the footprint unrotated, then rotate the collider with the prop
+      obj.rotation.y = 0; obj.updateMatrixWorld(true);
       const b = new THREE.Box3().setFromObject(obj);
-      collider = this.w.physics.addBox(b.getCenter(new THREE.Vector3()), b.getSize(new THREE.Vector3()).multiplyScalar(0.5));
+      obj.rotation.y = yaw; obj.updateMatrixWorld(true);
+      const c = b.getCenter(new THREE.Vector3()).sub(obj.position).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw).add(obj.position);
+      collider = this.w.physics.addBox(c, b.getSize(new THREE.Vector3()).multiplyScalar(0.5), yaw);
     } else if (col === 'pole') collider = this.poleCollider(obj);
     if (collider) this.w.registerSurface(collider, o.surface ?? 'stone');
     if (o.destructible && collider) { this.w.registerDestructible(collider, obj, o.destructible, o.surface ?? 'wood'); this.w.root.add(obj); }
@@ -124,6 +128,21 @@ export class MapBuilder {
     return b;
   }
   culled: { obj: THREE.Object3D; center: THREE.Vector3; m2: number; min2: number }[] = [];
+
+  /** put every loot spot onto the real walkable surface (sidewalks, plazas, floors) and drop the
+   *  ones that ended up inside buildings, on roofs or in props */
+  finalizeLoot() {
+    const w = this.w, down = new THREE.Vector3(0, -1, 0);
+    this.lootSpots = this.lootSpots.filter((p) => {
+      const g = w.terrain.getHeight(p.x, p.z);
+      if (g < w.waterLevel + 0.2) return false;
+      const hit = w.physics.raycast(new THREE.Vector3(p.x, g + 45, p.z), down, 47);
+      if (!hit) { p.y = g + 0.05; return true; }
+      if (hit.point.y - g > 0.6) return false; // roof, building interior or a prop
+      p.y = hit.point.y + 0.05;
+      return true;
+    });
+  }
 
   /** footprint of a model / kit piece (cached by the asset manager) */
   async sizeOf(id: string): Promise<THREE.Vector3> {
@@ -218,6 +237,7 @@ export async function buildBRMap(w: GameWorld, seed: number, progress: Progress)
   progress(0.15, 'Lumos City');
   const city = await buildCity(mb, c.x, c.z, c.h, offs, ext, R);
   for (const l of city.lamps) w.lights?.add(l);
+  w.ambient?.setLandmarks(city.bells, city.chimneys);
   for (const p of city.parking) {
     await mb.vehicle(R.pick(['car_cop', 'car_police', 'car_taxi', 'car_sedan', 'car_sport', 'car_suv', 'car_muscle', 'car_hatch', 'car_classic', 'motorcycle', 'hovercar']), p.x, p.z, p.yaw);
   }
@@ -362,6 +382,7 @@ export async function buildBRMap(w: GameWorld, seed: number, progress: Progress)
     mb.lootSpots.push(new THREE.Vector3(x, terrain.getHeight(x, z) + 0.05, z));
   }
   await w.lights?.build();
+  mb.finalizeLoot();
   const spawnPoints = pois.map((p) => new THREE.Vector3(p.x, p.h + 1, p.z));
   return { name: 'Lumos Island', pois, lootSpots: mb.lootSpots, spawnPoints, bounds: 760, extra: { builder: mb } };
 }

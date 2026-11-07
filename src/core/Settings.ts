@@ -24,6 +24,7 @@ export interface SettingsData {
   sfxVolume: number;
   showFps: boolean;
   damageNumbers: boolean;
+  headBob: boolean;
   thirdPerson: boolean;
   colorblind: boolean;
   playerName: string;
@@ -51,6 +52,7 @@ const DEFAULTS: SettingsData = {
   sfxVolume: 0.9,
   showFps: true,
   damageNumbers: true,
+  headBob: true,
   thirdPerson: false,
   colorblind: false,
   playerName: '',

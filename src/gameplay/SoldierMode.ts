@@ -84,12 +84,12 @@ export abstract class SoldierMode extends Mode {
       const s = b.s;
       if (s.alive) b.update(dt);
       const d = s.pos.distanceTo(cam);
-      const visible = d < far;
+      const visible = d < far && !s.hidden;
       s.model.root.visible = visible && (s.alive || d < 120);
       if (visible) s.animate(dt, d);
       else s.syncModel();
     }
-    if (w.player) w.player.soldier.animate(dt, w.player.thirdPerson ? 3 : 0);
+    if (w.player && !w.player.soldier.hidden) w.player.soldier.animate(dt, w.player.thirdPerson ? 3 : 0);
   }
 
   onKill(victim: Actor, info: DamageInfo) {
