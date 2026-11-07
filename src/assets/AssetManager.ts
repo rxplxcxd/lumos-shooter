@@ -59,6 +59,7 @@ export class AssetManager {
 
   /** Shadow flags + optional low-spec material conversion (Lambert is ~3x cheaper than PBR). */
   private triTex: THREE.Texture | null = null;
+  private lambertCache = new Map<string, THREE.MeshLambertMaterial>();
   /** untextured (flat white) building materials from some Sketchfab exports get world-space
    *  triplanar concrete so they read as real surfaces instead of clay renders */
   private triplanar(mat: THREE.Material) {
@@ -121,8 +122,13 @@ export class AssetManager {
         const conv = mats.map((mat) => {
           const sm = mat as THREE.MeshStandardMaterial;
           if (!sm.isMeshStandardMaterial) return mat;
-          const l = new THREE.MeshLambertMaterial({ map: sm.map, color: sm.color, transparent: sm.transparent, opacity: sm.opacity, alphaTest: sm.alphaTest, side: sm.side, vertexColors: sm.vertexColors, emissive: sm.emissive, emissiveMap: sm.emissiveMap });
-          l.name = sm.name;
+          // keep shared materials shared, otherwise the static batcher cannot merge them (draw calls)
+          let l = this.lambertCache.get(sm.uuid);
+          if (!l) {
+            l = new THREE.MeshLambertMaterial({ map: sm.map, color: sm.color, transparent: sm.transparent, opacity: sm.opacity, alphaTest: sm.alphaTest, side: sm.side, vertexColors: sm.vertexColors, emissive: sm.emissive, emissiveMap: sm.emissiveMap });
+            l.name = sm.name;
+            this.lambertCache.set(sm.uuid, l);
+          }
           return l;
         });
         m.material = Array.isArray(m.material) ? conv : conv[0];

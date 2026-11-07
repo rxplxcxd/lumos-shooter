@@ -111,12 +111,14 @@ export async function buildCity(mb: MapBuilder, cx: number, cz: number, h: numbe
   };
   const tile = 'kit:city:Sidewalk_Straight_3m';
   const plazaIdx = Math.floor(blockCenters.length / 2);
+  // low-end presets: one city-wide batch (draw calls = materials, not blocks x materials)
+  const shared = lowQ ? new THREE.Group() : null;
   for (let bi = 0; bi < blockCenters.length; bi++) for (let bj = 0; bj < blockCenters.length; bj++) {
     const bx = cx + blockCenters[bi], bz = cz + blockCenters[bj];
     const half = (offs[bi + 1] - offs[bi]) / 2 - ROAD_HW;
     const plaza = bi === plazaIdx && bj === plazaIdx;
-    const g = new THREE.Group(); g.name = `block_${bi}_${bj}`;
-    const props = new THREE.Group(); props.name = `props_${bi}_${bj}`;
+    const g = shared ?? new THREE.Group(); if (!shared) g.name = `block_${bi}_${bj}`;
+    const props = shared ?? new THREE.Group(); if (!shared) props.name = `props_${bi}_${bj}`;
     const near = new THREE.Group(), far = new THREE.Group();
     // --- sidewalk ring (or full plaza paving)
     const n = Math.max(2, Math.round((2 * half) / 3.6));
@@ -257,13 +259,14 @@ export async function buildCity(mb: MapBuilder, cx: number, cz: number, h: numbe
         }
       }
     }
-    mb.flush(g);
+    if (!shared) mb.flush(g);
     const bc = new THREE.Vector3(bx, h, bz);
     if (near.children.length) mb.flushCulled(near, bc, 150, 0);
     if (far.children.length) mb.flushCulled(far, bc, 5000, 150);
     // small props: batched separately, no shadows, hidden beyond ~250 m
-    if (props.children.length) mb.flushCulled(props, bc, 200 + detail * 60, 0, false);
+    if (!shared && props.children.length) mb.flushCulled(props, bc, 200 + detail * 60, 0, false);
   }
+  if (shared) mb.flush(shared);
   for (const [name, mats] of trees) {
     const piece = await w.assets.kitPiece('nature', name);
     let lod: THREE.Object3D | null = null;
